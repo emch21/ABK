@@ -181,11 +181,13 @@ object RootUtils {
             sync
             echo "[ABK] 模块安装完成，通常需要重启后生效"
         """.trimIndent()
-        return execRootScript(
+        val result = execRootScript(
             withManagerShellHelpers(script),
             timeoutSeconds = 240,
             onOutput = onOutput
         )
+        if (result.success) triggerAbkMetaMountPrepare()
+        return result
     }
 
     fun installApk(
@@ -540,6 +542,7 @@ object RootUtils {
             runCatching { File(ABK_META_MOUNT_SYSFS_ENABLED).exists() }.getOrDefault(false)
         ) {
             ensureAbkMetaMountPlaceholder()
+            triggerAbkMetaMountPrepare()
         }
 
         val modules = listKsuModules().takeIf { it.success }
@@ -736,6 +739,15 @@ object RootUtils {
         return result
     }
 
+    fun triggerAbkMetaMountPrepare(): ShellResult {
+        val script = """
+            set -e
+            [ -e ${shellQuote(ABK_META_MOUNT_SYSFS_PREPARE)} ] || exit 0
+            echo 1 > ${shellQuote(ABK_META_MOUNT_SYSFS_PREPARE)} 2>/dev/null || true
+        """.trimIndent()
+        return execRootScript(script, timeoutSeconds = 30L)
+    }
+
     fun runModuleActionScript(moduleDir: String, onOutput: ((String) -> Unit)? = null): ShellResult {
         val cleanDir = moduleDir.trim().ifBlank { "/data/adb/modules" }
         val safeDir = shellQuote(cleanDir)
@@ -750,6 +762,7 @@ object RootUtils {
         if (isAbkMetaMountModuleDir(cleanDir)) {
             val ensureResult = ensureAbkMetaMountPlaceholder(force = true)
             if (!ensureResult.success) return ensureResult
+            triggerAbkMetaMountPrepare()
         }
         return execRootScript(script, timeoutSeconds = 300L, onOutput = onOutput)
     }
@@ -865,6 +878,7 @@ object RootUtils {
 
         if (isAbkMetaMountModuleId(cleanId)) {
             ensureAbkMetaMountPlaceholder()
+            triggerAbkMetaMountPrepare()
         }
 
         val filePath = "/data/adb/modules/$cleanId/webroot/$cleanRelativePath"
@@ -889,6 +903,7 @@ object RootUtils {
 
         return readOnce() ?: if (isAbkMetaMountModuleId(cleanId)) {
             ensureAbkMetaMountPlaceholder(force = true)
+            triggerAbkMetaMountPrepare()
             readOnce()
         } else {
             null
@@ -957,7 +972,7 @@ object RootUtils {
         ABK_META_ACTION
         chmod 755 "${'$'}MOD/action.sh"
         cat > "${'$'}WEB/index.html" <<'ABK_META_WEB'
-        <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ABK Meta Mount</title><style>body{font-family:system-ui,sans-serif;margin:20px;line-height:1.45;color:#171717;background:#f7f7f4}main{max-width:760px}button{padding:10px 14px;margin:0 8px 10px 0;border:1px solid #888;background:#fff;border-radius:6px}pre{white-space:pre-wrap;background:#101820;color:#eef5f5;padding:12px;border-radius:6px;min-height:180px;overflow:auto}</style></head><body><main><h1>ABK Meta Mount</h1><p>Built-in KernelSU metamodule provider. Disable is persistent; already-mounted overlays may require reboot to fully unwind.</p><button onclick="refresh()">Refresh</button><button onclick="setEnabled(1)">Enable</button><button onclick="setEnabled(0)">Disable</button><pre id="out">Loading...</pre></main><script>function out(v){document.getElementById('out').textContent=v}function sh(c){try{if(window.ksu&&typeof window.ksu.exec==='function'){return window.ksu.exec(c)}return 'KernelSU WebUI exec API unavailable'}catch(e){return String(e)}}function refresh(){out(sh('cat /proc/abk_meta_mount/status 2>/dev/null || echo unavailable'))}function setEnabled(v){var c;if(v==1){c='rm -f /data/adb/modules/meta-abk-mount/disable /data/adb/modules/meta-abk-mount/remove; echo 1 > /sys/kernel/abk_meta_mount/enabled; echo 1 > /sys/kernel/abk_meta_mount/prepare 2>/dev/null || true'}else{c='mkdir -p /data/adb/modules/meta-abk-mount; touch /data/adb/modules/meta-abk-mount/disable; echo 0 > /sys/kernel/abk_meta_mount/enabled'}out(sh(c+'; cat /proc/abk_meta_mount/status 2>/dev/null || true'))}refresh()</script></body></html>
+        <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ABK Meta Mount</title><style>body{font-family:system-ui,sans-serif;margin:20px;line-height:1.45;color:#171717;background:#f7f7f4}main{max-width:760px}button{padding:10px 14px;margin:0 8px 10px 0;border:1px solid #888;background:#fff;border-radius:6px}pre{white-space:pre-wrap;background:#101820;color:#eef5f5;padding:12px;border-radius:6px;min-height:180px;overflow:auto}</style></head><body><main><h1>ABK Meta Mount</h1><p>Built-in KernelSU metamodule provider. Disable is persistent; already-mounted overlays may require reboot to fully unwind.</p><button onclick="refresh()">Refresh</button><button onclick="setEnabled(1)">Enable</button><button onclick="setEnabled(0)">Disable</button><pre id="out">Loading...</pre></main><script>function out(v){document.getElementById('out').textContent=v}function sh(c){try{if(window.ksu&&typeof window.ksu.exec==='function'){return window.ksu.exec(c)}return 'KernelSU WebUI exec API unavailable'}catch(e){return String(e)}}function refresh(){out(sh('echo 1 > /sys/kernel/abk_meta_mount/prepare 2>/dev/null || true; cat /proc/abk_meta_mount/status 2>/dev/null || echo unavailable'))}function setEnabled(v){var c;if(v==1){c='rm -f /data/adb/modules/meta-abk-mount/disable /data/adb/modules/meta-abk-mount/remove; echo 1 > /sys/kernel/abk_meta_mount/enabled; echo 1 > /sys/kernel/abk_meta_mount/prepare 2>/dev/null || true'}else{c='mkdir -p /data/adb/modules/meta-abk-mount; touch /data/adb/modules/meta-abk-mount/disable; echo 0 > /sys/kernel/abk_meta_mount/enabled'}out(sh(c+'; cat /proc/abk_meta_mount/status 2>/dev/null || true'))}refresh()</script></body></html>
         ABK_META_WEB
         if [ -e "${'$'}MARK" ] && [ ! -L "${'$'}MARK" ]; then
             :
