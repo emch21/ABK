@@ -52,4 +52,40 @@ class RuntimeModuleControlTest {
 
         assertEquals(RuntimeModuleControlBackend.NONE, module.preferredControlBackend())
     }
+
+    @Test
+    fun `ABK control backed action runs local action script`() {
+        val module = AbkRuntimeModule(
+            id = "meta-abk-mount",
+            type = "builtin",
+            source = "abk",
+            actionSupported = true,
+            hasActionScript = true
+        )
+
+        assertEquals(RuntimeModuleActionBackend.ABK_ACTION_SCRIPT, module.preferredActionBackend())
+    }
+
+    @Test
+    fun `KSU backed action uses KSU action command`() {
+        val module = AbkRuntimeModule(
+            id = "zygisk_lsposed",
+            type = "standard",
+            source = "ksud",
+            actionSupported = true
+        )
+
+        assertEquals(RuntimeModuleActionBackend.KSU_ACTION, module.preferredActionBackend())
+    }
+
+    @Test
+    fun `module without action support has no action backend`() {
+        val module = AbkRuntimeModule(
+            id = "readonly",
+            type = "builtin",
+            source = "abk"
+        )
+
+        assertEquals(RuntimeModuleActionBackend.NONE, module.preferredActionBackend())
+    }
 }

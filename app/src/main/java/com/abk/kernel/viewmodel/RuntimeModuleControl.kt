@@ -8,18 +8,38 @@ internal enum class RuntimeModuleControlBackend {
     NONE
 }
 
+internal enum class RuntimeModuleActionBackend {
+    ABK_ACTION_SCRIPT,
+    KSU_ACTION,
+    NONE
+}
+
 internal fun AbkRuntimeModule.preferredControlBackend(): RuntimeModuleControlBackend =
     when {
-        controllable && source.split(',').any { it.trim() == "abk" } -> RuntimeModuleControlBackend.ABK_CONTROL
-        normalizedRuntimeModuleType() == "standard" || source.split(',').any { it.trim() == "ksud" } -> RuntimeModuleControlBackend.KSU
+        controllable && hasRuntimeSource("abk") -> RuntimeModuleControlBackend.ABK_CONTROL
+        normalizedRuntimeModuleType() == "standard" || hasRuntimeSource("ksud") -> RuntimeModuleControlBackend.KSU
         else -> RuntimeModuleControlBackend.NONE
     }
+
+internal fun AbkRuntimeModule.preferredActionBackend(): RuntimeModuleActionBackend =
+    when {
+        !actionSupported && !hasActionScript -> RuntimeModuleActionBackend.NONE
+        hasRuntimeSource("abk") -> RuntimeModuleActionBackend.ABK_ACTION_SCRIPT
+        normalizedRuntimeModuleType() == "standard" || hasRuntimeSource("ksud") -> RuntimeModuleActionBackend.KSU_ACTION
+        else -> RuntimeModuleActionBackend.ABK_ACTION_SCRIPT
+    }
+
+internal fun AbkRuntimeModule.isAbkMetaMount(): Boolean =
+    id.trim() == "meta-abk-mount"
 
 private fun AbkRuntimeModule.normalizedRuntimeModuleType(): String =
     type.ifBlank {
         when {
-            source.split(',').any { it.trim() == "kpm" } -> "kpm"
-            source.split(',').any { it.trim() == "ksud" } -> "standard"
+            hasRuntimeSource("kpm") -> "kpm"
+            hasRuntimeSource("ksud") -> "standard"
             else -> "builtin"
         }
     }
+
+private fun AbkRuntimeModule.hasRuntimeSource(value: String): Boolean =
+    source.split(',').any { it.trim() == value }

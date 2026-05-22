@@ -715,6 +715,20 @@ object RootUtils {
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 300L, onOutput = onOutput)
     }
 
+    fun runModuleActionScript(moduleDir: String, onOutput: ((String) -> Unit)? = null): ShellResult {
+        val cleanDir = moduleDir.trim().ifBlank { "/data/adb/modules" }
+        val safeDir = shellQuote(cleanDir)
+        val script = """
+            set -e
+            MOD=$safeDir
+            ACTION="${'$'}MOD/action.sh"
+            [ -f "${'$'}ACTION" ] || { echo "action.sh not found"; exit 2; }
+            cd "${'$'}MOD" 2>/dev/null || exit 2
+            /system/bin/sh "${'$'}ACTION"
+        """.trimIndent()
+        return execRootScript(script, timeoutSeconds = 300L, onOutput = onOutput)
+    }
+
     fun setKsuModuleEnabled(moduleId: String, enabled: Boolean): ShellResult {
         val safeId = shellQuote(moduleId.trim())
         val verb = if (enabled) "enable" else "disable"
@@ -785,6 +799,15 @@ object RootUtils {
         }
     }
 
+    fun setAbkMetaMountEnabled(enabled: Boolean): ShellResult {
+        val script = """
+            set -e
+            [ -e /sys/kernel/abk_meta_mount/enabled ] || exit 2
+            echo ${if (enabled) "1" else "0"} > /sys/kernel/abk_meta_mount/enabled
+        """.trimIndent()
+        return execRootScript(script, timeoutSeconds = 30L)
+    }
+
     fun execRootCommandForWebUi(command: String, cwd: String = "", timeoutSeconds: Long = 120L): ShellResult {
         val prefix = if (cwd.isBlank()) {
             ""
@@ -824,6 +847,7 @@ object RootUtils {
         val cleanId = moduleId.trim()
         if (cleanId.isBlank()) return "{}"
         val moduleDir = "/data/adb/modules/$cleanId"
+        val webRoot = "$moduleDir/webroot"
         val modules = listKsuModules().takeIf { it.success }?.output?.joinToString("\n").orEmpty()
         val moduleJson = runCatching {
             val array = org.json.JSONArray(modules.ifBlank { "[]" })
@@ -831,12 +855,14 @@ object RootUtils {
                 val item = array.optJSONObject(index) ?: continue
                 if (item.optString("id") == cleanId) {
                     item.put("moduleDir", moduleDir)
+                    item.put("webRoot", webRoot)
                     return@runCatching item.toString()
                 }
             }
             org.json.JSONObject()
                 .put("id", cleanId)
                 .put("moduleDir", moduleDir)
+                .put("webRoot", webRoot)
                 .toString()
         }.getOrDefault("{}")
         return moduleJson

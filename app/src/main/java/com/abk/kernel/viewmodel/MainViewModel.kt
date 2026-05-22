@@ -988,18 +988,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val result = withContext(Dispatchers.IO) {
-                when (module?.preferredControlBackend()) {
-                    RuntimeModuleControlBackend.ABK_CONTROL -> {
+                when {
+                    module?.isAbkMetaMount() == true -> RootUtils.setAbkMetaMountEnabled(enabled)
+                    module?.preferredControlBackend() == RuntimeModuleControlBackend.ABK_CONTROL -> {
                         val command = if (enabled) "enable $cleanId" else "disable $cleanId"
                         val controlResult = RootUtils.writeAbkControlCommand(command)
-                        if (controlResult.success || !module.isKsuBacked()) {
+                        if (controlResult.success) {
                             controlResult
-                        } else {
+                        } else if (module.isKsuBacked()) {
                             RootUtils.setKsuModuleEnabled(cleanId, enabled)
+                        } else {
+                            controlResult
                         }
                     }
-                    RuntimeModuleControlBackend.KSU -> RootUtils.setKsuModuleEnabled(cleanId, enabled)
-                    RuntimeModuleControlBackend.NONE, null -> RootUtils.writeAbkControlCommand(
+                    module?.preferredControlBackend() == RuntimeModuleControlBackend.KSU -> {
+                        RootUtils.setKsuModuleEnabled(cleanId, enabled)
+                    }
+                    else -> RootUtils.writeAbkControlCommand(
                         if (enabled) "enable $cleanId" else "disable $cleanId"
                     )
                 }
@@ -1062,7 +1067,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun runRuntimeModuleAction(moduleId: String) {
         val cleanId = moduleId.trim()
         val module = _uiState.value.abkRuntimeStatus?.modules?.firstOrNull { it.id == cleanId } ?: return
-        if (cleanId.isBlank() || !module.actionSupported || _uiState.value.abkRuntimeModuleActionId != null) return
+        if (cleanId.isBlank() || (!module.actionSupported && !module.hasActionScript) || _uiState.value.abkRuntimeModuleActionId != null) return
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.update {
                 it.copy(
@@ -1072,9 +1077,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     abkRuntimeError = null
                 )
             }
-            val result = RootUtils.runKsuModuleAction(cleanId) { line ->
-                _uiState.update { state ->
-                    state.copy(abkRuntimeModuleActionOutput = state.abkRuntimeModuleActionOutput + line)
+            val result = when (module.preferredActionBackend()) {
+                RuntimeModuleActionBackend.ABK_ACTION_SCRIPT -> {
+                    RootUtils.runModuleActionScript(
+                        module.moduleDir.ifBlank { "/data/adb/modules/$cleanId" }
+                    ) { line ->
+                        _uiState.update { state ->
+                            state.copy(abkRuntimeModuleActionOutput = state.abkRuntimeModuleActionOutput + line)
+                        }
+                    }
+                }
+                RuntimeModuleActionBackend.KSU_ACTION -> {
+                    RootUtils.runKsuModuleAction(cleanId) { line ->
+                        _uiState.update { state ->
+                            state.copy(abkRuntimeModuleActionOutput = state.abkRuntimeModuleActionOutput + line)
+                        }
+                    }
+                }
+                RuntimeModuleActionBackend.NONE -> {
+                    RootUtils.runModuleActionScript(
+                        module.moduleDir.ifBlank { "/data/adb/modules/$cleanId" }
+                    ) { line ->
+                        _uiState.update { state ->
+                            state.copy(abkRuntimeModuleActionOutput = state.abkRuntimeModuleActionOutput + line)
+                        }
+                    }
                 }
             }
             _uiState.update { state ->
