@@ -33,10 +33,17 @@ object RootUtils {
     private const val BUNDLED_KSUD_BINARY_NAME = "ksud"
     private const val BUNDLED_KSUD_METADATA_NAME = "source.properties"
     private const val BUNDLED_KSUD_INSTALL_DIR = "bundled-ksud"
+    private const val ABK_META_MOUNT_ID = "meta-abk-mount"
+    private const val ABK_META_MOUNT_DIR = "/data/adb/modules/meta-abk-mount"
+    private const val ABK_META_MOUNT_WEB_ROOT = "/data/adb/modules/meta-abk-mount/webroot"
+    private const val ABK_META_MOUNT_SYSFS_ENABLED = "/sys/kernel/abk_meta_mount/enabled"
+    private const val ABK_META_MOUNT_SYSFS_PREPARE = "/sys/kernel/abk_meta_mount/prepare"
     private val BOOT_PATCH_PARTITIONS = listOf("init_boot", "boot", "vendor_boot")
     private val KSU_FEATURE_NAME_REGEX = Regex("^[a-z0-9_]+$")
     private var appContext: Context? = null
     private val bundledKsudLock = Any()
+    @Volatile
+    private var abkMetaMountPlaceholderEnsured = false
 
     private data class BundledKsudMetadata(
         val ref: String,
@@ -529,6 +536,12 @@ object RootUtils {
                 ?.takeIf { it.isNotBlank() && it.startsWith("{") }
         }
 
+        if (control?.contains(ABK_META_MOUNT_ID) == true ||
+            runCatching { File(ABK_META_MOUNT_SYSFS_ENABLED).exists() }.getOrDefault(false)
+        ) {
+            ensureAbkMetaMountPlaceholder()
+        }
+
         val modules = listKsuModules().takeIf { it.success }
             ?.output
             ?.joinToString("\n")
@@ -715,6 +728,14 @@ object RootUtils {
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 300L, onOutput = onOutput)
     }
 
+    fun ensureAbkMetaMountPlaceholder(force: Boolean = false): ShellResult {
+        if (!force && abkMetaMountPlaceholderEnsured) return ShellResult(true, emptyList())
+
+        val result = execRootScript(abkMetaMountPlaceholderScript(), timeoutSeconds = 30L)
+        if (result.success) abkMetaMountPlaceholderEnsured = true
+        return result
+    }
+
     fun runModuleActionScript(moduleDir: String, onOutput: ((String) -> Unit)? = null): ShellResult {
         val cleanDir = moduleDir.trim().ifBlank { "/data/adb/modules" }
         val safeDir = shellQuote(cleanDir)
@@ -726,6 +747,10 @@ object RootUtils {
             cd "${'$'}MOD" 2>/dev/null || exit 2
             /system/bin/sh "${'$'}ACTION"
         """.trimIndent()
+        if (isAbkMetaMountModuleDir(cleanDir)) {
+            val ensureResult = ensureAbkMetaMountPlaceholder(force = true)
+            if (!ensureResult.success) return ensureResult
+        }
         return execRootScript(script, timeoutSeconds = 300L, onOutput = onOutput)
     }
 
@@ -800,10 +825,26 @@ object RootUtils {
     }
 
     fun setAbkMetaMountEnabled(enabled: Boolean): ShellResult {
+        val ensureResult = ensureAbkMetaMountPlaceholder(force = true)
+        if (!ensureResult.success) return ensureResult
         val script = """
             set -e
-            [ -e /sys/kernel/abk_meta_mount/enabled ] || exit 2
-            echo ${if (enabled) "1" else "0"} > /sys/kernel/abk_meta_mount/enabled
+            SYS=${shellQuote(ABK_META_MOUNT_SYSFS_ENABLED)}
+            PREPARE=${shellQuote(ABK_META_MOUNT_SYSFS_PREPARE)}
+            MOD=${shellQuote(ABK_META_MOUNT_DIR)}
+            [ -e "${'$'}SYS" ] || { echo "abk_meta_mount sysfs not found"; exit 2; }
+            mkdir -p "${'$'}MOD"
+            if [ "${if (enabled) "1" else "0"}" = "1" ]; then
+                rm -f "${'$'}MOD/disable" "${'$'}MOD/remove"
+                echo 1 > "${'$'}SYS"
+                [ -e "${'$'}PREPARE" ] && echo 1 > "${'$'}PREPARE" || true
+            else
+                touch "${'$'}MOD/disable"
+                rm -f "${'$'}MOD/remove"
+                echo 0 > "${'$'}SYS"
+            fi
+            state=${'$'}(cat "${'$'}SYS" 2>/dev/null || echo unknown)
+            [ "${if (enabled) "1" else "0"}" = "${'$'}state" ] || { echo "abk_meta_mount enable state mismatch: ${'$'}state"; exit 3; }
         """.trimIndent()
         return execRootScript(script, timeoutSeconds = 30L)
     }
@@ -822,8 +863,12 @@ object RootUtils {
         val cleanRelativePath = sanitizeWebRelativePath(relativePath) ?: return null
         if (cleanId.isBlank()) return null
 
+        if (isAbkMetaMountModuleId(cleanId)) {
+            ensureAbkMetaMountPlaceholder()
+        }
+
         val filePath = "/data/adb/modules/$cleanId/webroot/$cleanRelativePath"
-        return try {
+        fun readOnce(): ByteArray? = try {
             createRootShell(timeoutSeconds = 30L).use { shell ->
                 val result = execWithShell(
                     shell = shell,
@@ -839,6 +884,13 @@ object RootUtils {
                 if (encoded.isBlank()) ByteArray(0) else Base64.decode(encoded, Base64.DEFAULT)
             }
         } catch (error: Throwable) {
+            null
+        }
+
+        return readOnce() ?: if (isAbkMetaMountModuleId(cleanId)) {
+            ensureAbkMetaMountPlaceholder(force = true)
+            readOnce()
+        } else {
             null
         }
     }
@@ -867,6 +919,69 @@ object RootUtils {
         }.getOrDefault("{}")
         return moduleJson
     }
+
+    private fun abkMetaMountPlaceholderScript(): String = """
+        set -e
+        MOD=${shellQuote(ABK_META_MOUNT_DIR)}
+        WEB=${shellQuote(ABK_META_MOUNT_WEB_ROOT)}
+        MARK='/data/adb/metamodule'
+        mkdir -p "${'$'}MOD" "${'$'}WEB"
+        cat > "${'$'}MOD/module.prop" <<'ABK_META_PROP'
+        id=meta-abk-mount
+        name=ABK Meta Mount
+        version=0.1.0
+        versionCode=1
+        author=ABK
+        description=Built-in KernelSU-compatible metamodule provider
+        metamodule=1
+        mount=false
+        skip_mount=true
+        web=1
+        webui=1
+        action=1
+        ABK_META_PROP
+        cat > "${'$'}MOD/metamount.sh" <<'ABK_META_METAMOUNT'
+        #!/system/bin/sh
+        rm -f /data/adb/modules/meta-abk-mount/disable /data/adb/modules/meta-abk-mount/remove
+        echo 1 > /sys/kernel/abk_meta_mount/enabled 2>/dev/null || true
+        echo 1 > /sys/kernel/abk_meta_mount/prepare 2>/dev/null || true
+        ABK_META_METAMOUNT
+        chmod 755 "${'$'}MOD/metamount.sh"
+        cat > "${'$'}MOD/action.sh" <<'ABK_META_ACTION'
+        #!/system/bin/sh
+        if [ -f /proc/abk_meta_mount/status ]; then
+            cat /proc/abk_meta_mount/status
+        else
+            echo 'ABK Meta Mount status unavailable'
+        fi
+        ABK_META_ACTION
+        chmod 755 "${'$'}MOD/action.sh"
+        cat > "${'$'}WEB/index.html" <<'ABK_META_WEB'
+        <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ABK Meta Mount</title><style>body{font-family:system-ui,sans-serif;margin:20px;line-height:1.45;color:#171717;background:#f7f7f4}main{max-width:760px}button{padding:10px 14px;margin:0 8px 10px 0;border:1px solid #888;background:#fff;border-radius:6px}pre{white-space:pre-wrap;background:#101820;color:#eef5f5;padding:12px;border-radius:6px;min-height:180px;overflow:auto}</style></head><body><main><h1>ABK Meta Mount</h1><p>Built-in KernelSU metamodule provider. Disable is persistent; already-mounted overlays may require reboot to fully unwind.</p><button onclick="refresh()">Refresh</button><button onclick="setEnabled(1)">Enable</button><button onclick="setEnabled(0)">Disable</button><pre id="out">Loading...</pre></main><script>function out(v){document.getElementById('out').textContent=v}function sh(c){try{if(window.ksu&&typeof window.ksu.exec==='function'){return window.ksu.exec(c)}return 'KernelSU WebUI exec API unavailable'}catch(e){return String(e)}}function refresh(){out(sh('cat /proc/abk_meta_mount/status 2>/dev/null || echo unavailable'))}function setEnabled(v){var c;if(v==1){c='rm -f /data/adb/modules/meta-abk-mount/disable /data/adb/modules/meta-abk-mount/remove; echo 1 > /sys/kernel/abk_meta_mount/enabled; echo 1 > /sys/kernel/abk_meta_mount/prepare 2>/dev/null || true'}else{c='mkdir -p /data/adb/modules/meta-abk-mount; touch /data/adb/modules/meta-abk-mount/disable; echo 0 > /sys/kernel/abk_meta_mount/enabled'}out(sh(c+'; cat /proc/abk_meta_mount/status 2>/dev/null || true'))}refresh()</script></body></html>
+        ABK_META_WEB
+        if [ -e "${'$'}MARK" ] && [ ! -L "${'$'}MARK" ]; then
+            :
+        else
+            TAKEOVER=0
+            if [ ! -e "${'$'}MARK" ]; then
+                TAKEOVER=1
+            elif [ -L "${'$'}MARK" ]; then
+                CUR=${'$'}(readlink "${'$'}MARK" 2>/dev/null || true)
+                if [ "${'$'}CUR" = "${'$'}MOD" ]; then
+                    TAKEOVER=1
+                elif [ -z "${'$'}CUR" ] || [ ! -d "${'$'}CUR" ] || [ -f "${'$'}CUR/disable" ] || [ -f "${'$'}CUR/remove" ]; then
+                    TAKEOVER=1
+                fi
+            fi
+            [ "${'$'}TAKEOVER" = 1 ] && ln -sfn "${'$'}MOD" "${'$'}MARK"
+        fi
+    """.trimIndent()
+
+    private fun isAbkMetaMountModuleId(moduleId: String): Boolean =
+        moduleId.trim() == ABK_META_MOUNT_ID
+
+    private fun isAbkMetaMountModuleDir(moduleDir: String): Boolean =
+        moduleDir.trim().trimEnd('/') == ABK_META_MOUNT_DIR
 
     @Suppress("DEPRECATION")
     private fun installedApplications(packageManager: PackageManager): List<ApplicationInfo> =
