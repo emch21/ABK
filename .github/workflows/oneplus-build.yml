@@ -224,7 +224,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
+          apt_update_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if sudo apt-get update; then
+                return 0
+              fi
+              echo "::warning::apt-get update 第 ${attempt} 次失败，清理索引后重试。"
+              sudo apt-get clean || true
+              sudo rm -rf /var/lib/apt/lists/*
+              sleep "$attempt"
+            done
+            echo "::error::apt-get update 连续失败。"
+            return 1
+          }
+
+          apt_update_retry
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
             python3 git curl ccache libelf-dev build-essential flex bison libssl-dev \
             libncurses-dev liblz4-tool zlib1g-dev libxml2-utils rsync unzip gawk \
@@ -341,8 +356,20 @@ jobs:
             cp "$WORKSPACE"/susfs4oki/kernel_patches/fs/* "$COMMON_ROOT/fs/" || true
             cp "$WORKSPACE"/susfs4oki/kernel_patches/include/linux/* "$COMMON_ROOT/include/linux/" || true
           elif [ "$KSU_VARIANT" = "SukiSU" ] || [ "$KSU_VARIANT" = "ReSukiSU" ]; then
-            cp "$WORKSPACE/kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch" "$COMMON_ROOT/" || \
-              cp "$WORKSPACE/kernel_patches/sukisu/scope_min_manual_hooks_v1.6.patch" "$COMMON_ROOT/" || true
+            MANUAL_HOOK_PATCH=""
+            case "$KERNEL_VERSION" in
+              5.10|5.15)
+                MANUAL_HOOK_PATCH="$WORKSPACE/kernel_patches/sukisu/scope_min_manual_hooks_v1.6.patch"
+                ;;
+              *)
+                if [ -f "$WORKSPACE/kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch" ]; then
+                  MANUAL_HOOK_PATCH="$WORKSPACE/kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch"
+                else
+                  MANUAL_HOOK_PATCH="$WORKSPACE/kernel_patches/sukisu/scope_min_manual_hooks_v1.6.patch"
+                fi
+                ;;
+            esac
+            [ -n "$MANUAL_HOOK_PATCH" ] && cp "$MANUAL_HOOK_PATCH" "$COMMON_ROOT/" || true
           fi
 
           if [ "$USE_UNICODE_BYPASS" = "true" ]; then
@@ -371,6 +398,135 @@ jobs:
               patch -p1 < "50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch" || true
           fi
 
+      - name: 修复 SukiSU SUSFS 源码兼容
+        if: ${{ inputs.ksu_variant == 'SukiSU' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKSPACE="$GITHUB_WORKSPACE/oneplus_workspace"
+          KERNEL_ROOT="$WORKSPACE/kernel_workspace/kernel_platform"
+
+          if [ "$EFFECTIVE_ENABLE_SUSFS" != "true" ]; then
+            echo "SUSFS 未启用，跳过 SukiSU SUSFS 兼容修复。"
+            exit 0
+          fi
+
+          KSU_BUILD_DIR=""
+          for dir in common/drivers/kernelsu drivers/kernelsu KernelSU/kernel kernel; do
+            if [ -d "$KERNEL_ROOT/$dir" ]; then
+              KSU_BUILD_DIR="$KERNEL_ROOT/$dir"
+              break
+            fi
+          done
+
+          if [ -z "$KSU_BUILD_DIR" ]; then
+            echo "::error::未找到 SukiSU 源码目录，无法修复 SUSFS 兼容。"
+            exit 1
+          fi
+
+          python3 - "$KSU_BUILD_DIR" <<'PY'
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          selinux_hide = root / "feature" / "selinux_hide.c"
+          rules_c = root / "selinux" / "rules.c"
+
+          if selinux_hide.exists():
+              path = selinux_hide
+              text = path.read_text()
+              original = text
+              replacements = [
+                  ("static struct selinux_state fake_state;", "struct selinux_state fake_state;"),
+                  (
+                      "static bool ksu_selinux_hide_running __read_mostly = false;",
+                      "bool ksu_selinux_hide_running __read_mostly = false;",
+                  ),
+                  ("static int security_context_to_sid_with_policy(", "int security_context_to_sid_with_policy("),
+                  ("static int security_sid_to_context_with_policy(", "int security_sid_to_context_with_policy("),
+                  (
+                      "static void __nocfi security_compute_av_user_with_policy(",
+                      "void __nocfi security_compute_av_user_with_policy(",
+                  ),
+                  ("static void security_compute_av_user_with_policy(", "void security_compute_av_user_with_policy("),
+                  ("static struct selinux_policy *backup_sepolicy;", "struct selinux_policy *backup_sepolicy;"),
+              ]
+              for old, new in replacements:
+                  text = text.replace(old, new)
+
+              if text != original:
+                  path.write_text(text)
+                  print(f"patched {path}")
+              else:
+                  print(f"no change for {path}")
+
+              final_text = path.read_text()
+              forbidden = (
+                  "static struct selinux_state fake_state;",
+                  "static bool ksu_selinux_hide_running __read_mostly = false;",
+                  "static int security_context_to_sid_with_policy(",
+                  "static int security_sid_to_context_with_policy(",
+                  "static void __nocfi security_compute_av_user_with_policy(",
+                  "static void security_compute_av_user_with_policy(",
+              )
+              present = [marker for marker in forbidden if marker in final_text]
+              if present:
+                  raise SystemExit(f"{path} still contains non-exported SELinux compatibility symbols: {present}")
+          elif rules_c.exists():
+              path = rules_c
+              text = path.read_text()
+              original = text
+              marker = "/* ABK: OnePlus builtin SUSFS SELinux compatibility globals. */"
+              if marker not in text:
+                  block = "\n".join([
+                      "",
+                      marker,
+                      "#ifdef CONFIG_KSU_SUSFS",
+                      "struct selinux_policy *backup_sepolicy;",
+                      "#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)",
+                      "int security_context_to_sid_with_policy(struct selinux_policy *policy, const char *scontext, u32 scontext_len,",
+                      "                                        u32 *sid, u32 def_sid, unsigned int gfp_flags)",
+                      "{",
+                      "    return -22;",
+                      "}",
+                      "int security_sid_to_context_with_policy(struct selinux_policy *policy, u32 sid, char **scontext,",
+                      "                                        u32 *scontext_len)",
+                      "{",
+                      "    return -22;",
+                      "}",
+                      "void security_compute_av_user_with_policy(struct selinux_policy *policy, u32 ssid, u32 tsid, u16 tclass,",
+                      "                                          struct av_decision *avd)",
+                      "{",
+                      "}",
+                      "#endif",
+                      "#endif",
+                      "",
+                  ])
+                  anchor = "#define ALL NULL\n"
+                  if anchor not in text:
+                      raise SystemExit(f"{path} missing insertion anchor: {anchor.strip()}")
+                  text = text.replace(anchor, anchor + block, 1)
+
+              if text != original:
+                  path.write_text(text)
+                  print(f"patched {path}")
+              else:
+                  print(f"no change for {path}")
+
+              final_text = path.read_text()
+              required = (
+                  "struct selinux_policy *backup_sepolicy;",
+                  "int security_context_to_sid_with_policy(",
+                  "int security_sid_to_context_with_policy(",
+                  "void security_compute_av_user_with_policy(",
+              )
+              missing = [marker for marker in required if marker not in final_text]
+              if missing:
+                  raise SystemExit(f"{path} missing OnePlus builtin SELinux compatibility markers: {missing}")
+          else:
+              raise SystemExit(f"{root} does not contain a supported SELinux compatibility source file")
+          PY
+
       - name: 修复 SukiSU/ReSukiSU sulog 兼容
         if: ${{ inputs.ksu_variant == 'SukiSU' || inputs.ksu_variant == 'ReSukiSU' }}
         shell: bash
@@ -395,13 +551,14 @@ jobs:
           python3 - "$KSU_BUILD_DIR/sulog/event.c" <<'PY'
           import sys
           from pathlib import Path
+          import re
 
           path = Path(sys.argv[1])
           if not path.exists():
               raise SystemExit(0)
 
           text = path.read_text()
-          old = "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);"
+          marker = "builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer"
           new = "\n".join([
               "    /* ABK: builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer. */",
               "#ifdef CONFIG_KSU_SUSFS",
@@ -410,11 +567,31 @@ jobs:
               "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
               "#endif",
           ])
-          if old in text and "builtin SUSFS ksu_sulog_capture()" not in text:
-              path.write_text(text.replace(old, new, 1))
+
+          changed = False
+          if marker not in text:
+              for old in (
+                  "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
+                  "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, &USER_ARG_NULL, gfp);",
+              ):
+                  if old in text:
+                      text = text.replace(old, new, 1)
+                      changed = True
+                      break
+
+          if changed:
+              path.write_text(text)
               print(f"patched {path}")
           else:
               print(f"no change for {path}")
+
+          final_text = path.read_text()
+          incompatible = re.search(
+              r"pending = ksu_sulog_capture\(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, &?USER_ARG_NULL, gfp\);",
+              final_text,
+          )
+          if incompatible and marker not in final_text:
+              raise SystemExit(f"{path} still contains incompatible ksu_sulog_capture grant_root argv call")
           PY
 
       - name: 配置 defconfig

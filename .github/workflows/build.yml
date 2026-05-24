@@ -388,7 +388,7 @@ jobs:
 
           # Dev 固定引用先完整复制 Stable 配置，后续只改这里的 *_DEV_REF 即可。
           OFFICIAL_DEV_REF="290609c945728fc93d85735918793567588103c1"
-          SUKISU_DEV_REF="c5af9eadac43b1f0b9751471be78e6eef681554b"
+          SUKISU_DEV_REF="aac170bcb86ce45516b3e2c0e2b32b57004b8f73"
           RESUKISU_DEV_REF="fb771414f249ab886c09f2cfcbbf91c4b4dab2d1"
 
           get_success_action_sha() {
@@ -607,7 +607,22 @@ jobs:
 
       - name: 安装编译依赖
         run: |
-          sudo apt-get update
+          apt_update_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if sudo apt-get update; then
+                return 0
+              fi
+              echo "::warning::apt-get update 第 ${attempt} 次失败，清理索引后重试。"
+              sudo apt-get clean || true
+              sudo rm -rf /var/lib/apt/lists/*
+              sleep "$attempt"
+            done
+            echo "::error::apt-get update 连续失败。"
+            return 1
+          }
+
+          apt_update_retry
           sudo apt-get install -y ccache python3 git curl build-essential libssl-dev bison flex libelf-dev dwarves
 
       - name: 配置 ccache
@@ -657,13 +672,31 @@ jobs:
           ANYKERNEL_BRANCH="gki-2.0"
           SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
 
+          retry_git_clone() {
+            local repo_url="$1"
+            local branch="$2"
+            local target_dir="$3"
+            local attempt
+            rm -rf "$target_dir"
+            for attempt in 1 2 3; do
+              if git clone "$repo_url" -b "$branch" --depth 1 "$target_dir"; then
+                return 0
+              fi
+              echo "::warning::git clone 失败: $repo_url@$branch (attempt $attempt)"
+              rm -rf "$target_dir"
+              sleep "$attempt"
+            done
+            echo "::error::git clone 最终失败: $repo_url@$branch"
+            return 1
+          }
+
           echo "克隆 AnyKernel3..."
           git clone https://github.com/WildKernels/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           rm -rf AnyKernel3/.git
 
           if [ "${{ inputs.enable_susfs }}" == "true" ]; then
             echo "克隆 SUSFS (分支: $SUSFS_BRANCH)..."
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+            retry_git_clone https://gitlab.com/simonpunk/susfs4ksu.git "$SUSFS_BRANCH" susfs4ksu
 
             CONFIG_FILE="config/config"
             if [ -f "$CONFIG_FILE" ]; then
@@ -1085,7 +1118,7 @@ jobs:
               sulog_event_c = kernel_dir / "sulog/event.c"
               if sulog_event_c.exists():
                   text = sulog_event_c.read_text()
-                  old = "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);"
+                  marker = "builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer"
                   new = "\n".join([
                       "    /* ABK: builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer. */",
                       "#ifdef CONFIG_KSU_SUSFS",
@@ -1094,9 +1127,15 @@ jobs:
                       "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
                       "#endif",
                   ])
-                  if old in text and "builtin SUSFS ksu_sulog_capture()" not in text:
-                      sulog_event_c.write_text(text.replace(old, new, 1))
-                      print("Fixed SukiSU/ReSukiSU builtin sulog grant_root argv type for CONFIG_KSU_SUSFS")
+                  if marker not in text:
+                      for old in (
+                          "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
+                          "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, &USER_ARG_NULL, gfp);",
+                      ):
+                          if old in text:
+                              sulog_event_c.write_text(text.replace(old, new, 1))
+                              print("Fixed SukiSU/ReSukiSU builtin sulog grant_root argv type for CONFIG_KSU_SUSFS")
+                              break
           PY
 
       - name: 配置 SukiSU 管理器信息
@@ -1856,6 +1895,9 @@ jobs:
           fi
 
           ensure_defconfig_value CONFIG_TCP_CONG_ADVANCED y
+          if [ -f net/ipv4/Kconfig ] && grep -q '^config TCP_CONG_BIC$' net/ipv4/Kconfig; then
+            ensure_defconfig_value CONFIG_TCP_CONG_BIC y
+          fi
           ensure_defconfig_value CONFIG_TCP_CONG_BBR y
           ensure_defconfig_value CONFIG_TCP_CONG_CUBIC y
           ensure_defconfig_value CONFIG_TCP_CONG_WESTWOOD y
@@ -2590,43 +2632,6 @@ jobs:
             sed -i '/kmi_symbol_list_strict_mode/d' ./common/BUILD.bazel
             rm -rf ./common/android/abi_gki_protected_exports_*
             sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" ./build/kernel/kleaf/impl/stamp.bzl
-            python3 - <<'PY'
-          from pathlib import Path
-          import re
-          import sys
-
-          path = Path("./common/BUILD.bazel")
-          if not path.exists():
-              sys.exit(0)
-
-          marker = '"net/ipv4/tcp_bic.ko"'
-          text = path.read_text()
-          if marker in text:
-              sys.exit(0)
-
-          pattern = re.compile(
-              r'(name\s*=\s*"kernel_aarch64"[\s\S]*?module_outs\s*=\s*\[)([\s\S]*?)(^\s*\])',
-              re.M,
-          )
-          match = pattern.search(text)
-          if not match:
-              print("::warning::未找到 kernel_aarch64 的 module_outs，跳过 tcp_bic.ko 注入")
-              sys.exit(0)
-
-          body = match.group(2)
-          indent = "        "
-          for line in body.splitlines():
-              if line.strip():
-                  indent = re.match(r'^\s*', line).group(0)
-                  break
-
-          if body.endswith("\n"):
-              body_new = body + f"{indent}{marker},\n"
-          else:
-              body_new = body + f"\n{indent}{marker},\n"
-
-          path.write_text(text[:match.start(2)] + body_new + text[match.end(2):])
-          PY
           fi
 
           VERSION_INPUT=$(echo "${{ inputs.version }}" | tr -d '[:space:]')
@@ -3137,7 +3142,7 @@ jobs:
               sulog_event_c = kernel_dir / "sulog/event.c"
               if sulog_event_c.exists():
                   text = sulog_event_c.read_text()
-                  old = "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);"
+                  marker = "builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer"
                   new = "\n".join([
                       "    /* ABK: builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer. */",
                       "#ifdef CONFIG_KSU_SUSFS",
@@ -3146,10 +3151,16 @@ jobs:
                       "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
                       "#endif",
                   ])
-                  if old in text and "builtin SUSFS ksu_sulog_capture()" not in text:
-                      sulog_event_c.write_text(text.replace(old, new, 1))
-                      changed = True
-                      print(f"  已修复 {sulog_event_c} 的 grant_root argv 参数类型")
+                  if marker not in text:
+                      for old in (
+                          "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
+                          "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, &USER_ARG_NULL, gfp);",
+                      ):
+                          if old in text:
+                              sulog_event_c.write_text(text.replace(old, new, 1))
+                              changed = True
+                              print(f"  已修复 {sulog_event_c} 的 grant_root argv 参数类型")
+                              break
 
           if not changed:
               print("SukiSU 源码兼容修复无需修改。")
@@ -3190,7 +3201,7 @@ jobs:
 
           if [ -f "$KSU_BUILD_DIR/sulog/event.c" ]; then
             if grep -qF 'struct user_arg_ptr *argv_user' "$KSU_BUILD_DIR/sulog/event.c" \
-              && grep -qF 'NULL, USER_ARG_NULL, gfp' "$KSU_BUILD_DIR/sulog/event.c" \
+              && grep -Eq 'NULL, (&)?USER_ARG_NULL, gfp' "$KSU_BUILD_DIR/sulog/event.c" \
               && ! grep -qF 'builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer' "$KSU_BUILD_DIR/sulog/event.c"; then
               echo "::error::SukiSU/ReSukiSU sulog/event.c 仍存在 argv 参数类型不兼容调用: $KSU_BUILD_DIR/sulog/event.c"
               exit 1

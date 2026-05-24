@@ -399,6 +399,22 @@ def patch_selinux_hide(path, changed_files):
         "static bool ksu_selinux_hide_running __read_mostly = false;",
         "bool ksu_selinux_hide_running __read_mostly = false;",
     )
+    text = text.replace(
+        "static int security_context_to_sid_with_policy(",
+        "int security_context_to_sid_with_policy(",
+    )
+    text = text.replace(
+        "static int security_sid_to_context_with_policy(",
+        "int security_sid_to_context_with_policy(",
+    )
+    text = text.replace(
+        "static void __nocfi security_compute_av_user_with_policy(",
+        "void __nocfi security_compute_av_user_with_policy(",
+    )
+    text = text.replace(
+        "static void security_compute_av_user_with_policy(",
+        "void security_compute_av_user_with_policy(",
+    )
 
     write_if_changed(path, text, original, changed_files)
 
@@ -659,6 +675,8 @@ def verify(ksu_dir):
         ksu_dir / "feature/selinux_hide.c": (
             "struct selinux_state fake_state;",
             "bool ksu_selinux_hide_running __read_mostly",
+            "int security_context_to_sid_with_policy(",
+            "int security_sid_to_context_with_policy(",
         ),
         ksu_dir / "supercall/supercall.c": ("int ksu_handle_sys_reboot",),
     }
@@ -667,6 +685,22 @@ def verify(ksu_dir):
         missing = [marker for marker in markers if marker not in data]
         if missing:
             die(f"{path} missing markers: {missing}")
+
+    selinux_hide = (ksu_dir / "feature/selinux_hide.c").read_text()
+    forbidden = (
+        "static int security_context_to_sid_with_policy(",
+        "static int security_sid_to_context_with_policy(",
+        "static void __nocfi security_compute_av_user_with_policy(",
+        "static void security_compute_av_user_with_policy(",
+    )
+    present = [marker for marker in forbidden if marker in selinux_hide]
+    if present:
+        die(f"{ksu_dir / 'feature/selinux_hide.c'} still has non-exported SELinux compat symbols: {present}")
+    if (
+        "void __nocfi security_compute_av_user_with_policy(" not in selinux_hide
+        and "void security_compute_av_user_with_policy(" not in selinux_hide
+    ):
+        die(f"{ksu_dir / 'feature/selinux_hide.c'} missing exported security_compute_av_user_with_policy()")
 
 
 def main():
