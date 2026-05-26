@@ -98,7 +98,7 @@ class GitHubRepository(
             Result.Error(tr(R.string.gh_module_conf_unreadable, lastError))
         }
 
-    suspend fun fetchModuleCatalog(repositoryUrl: String): Result<ModuleCatalogFetchResult> =
+    suspend fun fetchBuildModuleCatalog(repositoryUrl: String): Result<ModuleCatalogFetchResult> =
         withContext(Dispatchers.IO) {
             val candidates = moduleCatalogIndexCandidates(repositoryUrl)
             if (candidates.isEmpty()) {
@@ -132,6 +132,52 @@ class GitHubRepository(
 
                     return@withContext Result.Success(
                         ModuleCatalogFetchResult(
+                            name = catalog.name,
+                            indexUrl = indexUrl,
+                            modules = catalog.modules,
+                            skippedCount = catalog.skippedCount
+                        )
+                    )
+                }
+            }
+
+            Result.Error(tr(R.string.gh_catalog_json_unreadable, lastError))
+        }
+
+    suspend fun fetchRuntimeModuleCatalog(repositoryUrl: String): Result<RuntimeModuleCatalogFetchResult> =
+        withContext(Dispatchers.IO) {
+            val candidates = runtimeModuleCatalogCandidates(repositoryUrl)
+            if (candidates.isEmpty()) {
+                return@withContext Result.Error(tr(R.string.gh_repo_link_unsupported))
+            }
+
+            var lastError = ""
+            for (indexUrl in candidates) {
+                val request = Request.Builder()
+                    .url(indexUrl)
+                    .header("Accept", "application/json,text/plain,*/*")
+                    .build()
+                val response = runCatching { publicHttpClient.newCall(request).execute() }
+                    .getOrElse {
+                        lastError = it.message ?: tr(R.string.gh_network_request_failed)
+                        null
+                    } ?: continue
+
+                response.use { resp ->
+                    if (!resp.isSuccessful) {
+                        lastError = "HTTP ${resp.code}"
+                        return@use
+                    }
+
+                    val body = resp.body?.string().orEmpty()
+                    val catalog = runCatching { parseRuntimeModuleCatalogDocument(body, repositoryUrl) }
+                        .getOrElse {
+                            lastError = tr(R.string.gh_json_parse_failed, it.message ?: tr(R.string.gh_format_error))
+                            return@use
+                        }
+
+                    return@withContext Result.Success(
+                        RuntimeModuleCatalogFetchResult(
                             name = catalog.name,
                             indexUrl = indexUrl,
                             modules = catalog.modules,
@@ -468,6 +514,13 @@ class GitHubRepository(
         return emptyList()
     }
 
+    internal fun runtimeModuleCatalogCandidates(repositoryUrl: String): List<String> {
+        val clean = repositoryUrl.trim().trimEnd('/')
+        if (clean.isBlank()) return emptyList()
+        if (clean.endsWith(".json", ignoreCase = true)) return listOf(clean)
+        return emptyList()
+    }
+
     internal fun externalModuleConfCandidates(repositoryUrl: String): List<String> {
         val clean = repositoryUrl.trim().trimEnd('/')
         if (clean.isBlank()) return emptyList()
@@ -526,6 +579,25 @@ class GitHubRepository(
         )
     }
 
+    internal fun parseRuntimeModuleCatalogDocument(
+        body: String,
+        repositoryUrl: String
+    ): ParsedRuntimeModuleCatalogDocument {
+        val root = JsonParser.parseString(body)
+        val document = root.asJsonObjectOrNull() ?: error(tr(R.string.gh_root_must_be_object))
+        val rawModules = document.arrayOrEmpty("modules")
+        val modules = rawModules.mapNotNull { element ->
+            element.asJsonObjectOrNull()?.let(::sanitizeRuntimeCatalogItem)
+        }.distinctBy { item ->
+            item.id.trim().lowercase().ifBlank { item.name.trim().lowercase() }
+        }
+        return ParsedRuntimeModuleCatalogDocument(
+            name = document.stringOrEmpty("name").ifBlank { repositoryUrl.toCatalogFallbackName() },
+            modules = modules,
+            skippedCount = (rawModules.size() - modules.size).coerceAtLeast(0)
+        )
+    }
+
     private fun sanitizeCatalogItem(raw: JsonObject): ModuleCatalogItem? {
         val repoUrl = raw.stringOrEmpty("repoUrl")
         if (repoUrl.isBlank()) return null
@@ -556,6 +628,33 @@ class GitHubRepository(
             recommendedStages = recommendedStages,
             author = raw.stringOrEmpty("author"),
             homepage = raw.stringOrEmpty("homepage")
+        )
+    }
+
+    private fun sanitizeRuntimeCatalogItem(raw: JsonObject): RuntimeModuleCatalogItem? {
+        val versions = raw.arrayOrEmpty("versions")
+        val latestVersion = versions.firstOrNull()?.asJsonObjectOrNull()
+        val zipUrl = latestVersion?.stringOrEmpty("zipUrl").orEmpty()
+        val name = raw.stringOrEmpty("name")
+        if (name.isBlank() || zipUrl.isBlank()) return null
+        return RuntimeModuleCatalogItem(
+            id = raw.stringOrEmpty("id").ifBlank { name.lowercase().replace(' ', '_') },
+            name = name,
+            version = latestVersion?.stringOrEmpty("version").orEmpty().ifBlank { raw.stringOrEmpty("version") },
+            versionCode = latestVersion?.longOrZero("versionCode").takeIf { it != null && it > 0L }
+                ?: raw.longOrZero("versionCode"),
+            author = raw.stringOrEmpty("author"),
+            description = raw.stringOrEmpty("description"),
+            zipUrl = zipUrl,
+            changelog = latestVersion?.stringOrEmpty("changelog").orEmpty(),
+            support = raw.stringOrEmpty("support"),
+            donate = raw.stringOrEmpty("donate"),
+            website = raw.stringOrEmpty("website"),
+            cover = raw.stringOrEmpty("cover"),
+            icon = raw.stringOrEmpty("icon"),
+            verified = raw.booleanOrFalse("verified"),
+            minApi = raw.intOrNull("minApi"),
+            maxApi = raw.intOrNull("maxApi")
         )
     }
 
@@ -649,6 +748,23 @@ class GitHubRepository(
             .map { it.trim() }
             .filter { it.isNotBlank() }
 
+    private fun JsonObject.intOrNull(name: String): Int? =
+        get(name)
+            ?.takeIf { !it.isJsonNull && it.isJsonPrimitive }
+            ?.asInt
+
+    private fun JsonObject.longOrZero(name: String): Long =
+        get(name)
+            ?.takeIf { !it.isJsonNull && it.isJsonPrimitive }
+            ?.asLong
+            ?: 0L
+
+    private fun JsonObject.booleanOrFalse(name: String): Boolean =
+        get(name)
+            ?.takeIf { !it.isJsonNull && it.isJsonPrimitive }
+            ?.asBoolean
+            ?: false
+
     private fun JsonObject.arrayOrEmpty(name: String): JsonArray =
         get(name)?.takeIf { !it.isJsonNull && it.isJsonArray }?.asJsonArray ?: JsonArray()
 
@@ -673,5 +789,11 @@ internal data class GithubRepositoryParts(
 internal data class ParsedModuleCatalogDocument(
     val name: String,
     val modules: List<ModuleCatalogItem>,
+    val skippedCount: Int
+)
+
+internal data class ParsedRuntimeModuleCatalogDocument(
+    val name: String,
+    val modules: List<RuntimeModuleCatalogItem>,
     val skippedCount: Int
 )

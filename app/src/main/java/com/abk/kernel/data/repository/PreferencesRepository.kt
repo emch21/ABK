@@ -33,7 +33,9 @@ class PreferencesRepository(private val context: Context) {
         val KEY_BUILD_CONFIG = stringPreferencesKey("build_config_json")
         val KEY_BUILD_PLANS = stringPreferencesKey("build_plans_json")
         val KEY_BUILD_QUEUE = stringPreferencesKey("build_queue_json")
-        val KEY_MODULE_CATALOG_REPOSITORIES = stringPreferencesKey("module_catalog_repositories_json")
+        val KEY_RUNTIME_MODULE_REPOSITORIES = stringPreferencesKey("runtime_module_repositories_json")
+        val KEY_BUILD_MODULE_REPOSITORIES = stringPreferencesKey("build_module_repositories_json")
+        val KEY_MODULE_CATALOG_REPOSITORIES_LEGACY = stringPreferencesKey("module_catalog_repositories_json")
         val KEY_DOWNLOADED_ARTIFACTS = stringPreferencesKey("downloaded_artifacts_json")
         val KEY_REMOTE_ARTIFACTS = stringPreferencesKey("remote_artifacts_json")
         val KEY_BUILD_PARAMETER_SUMMARIES = stringPreferencesKey("build_parameter_summaries_json")
@@ -64,8 +66,11 @@ class PreferencesRepository(private val context: Context) {
     val buildConfigJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_CONFIG] }
     val buildPlansJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_PLANS] }
     val buildQueueJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_QUEUE] }
-    val moduleCatalogRepositoriesJson: Flow<String?> = context.dataStore.data.map {
-        it[KEY_MODULE_CATALOG_REPOSITORIES]
+    val runtimeModuleRepositoriesJson: Flow<String?> = context.dataStore.data.map {
+        it[KEY_RUNTIME_MODULE_REPOSITORIES]
+    }
+    val buildModuleRepositoriesJson: Flow<String?> = context.dataStore.data.map {
+        it[KEY_BUILD_MODULE_REPOSITORIES] ?: it[KEY_MODULE_CATALOG_REPOSITORIES_LEGACY]
     }
     val downloadedArtifactsJson: Flow<String?> = context.dataStore.data.map { it[KEY_DOWNLOADED_ARTIFACTS] }
     val remoteArtifactsJson: Flow<String?> = context.dataStore.data.map { it[KEY_REMOTE_ARTIFACTS] }
@@ -127,8 +132,11 @@ class PreferencesRepository(private val context: Context) {
     suspend fun saveBuildConfigJson(json: String) = context.dataStore.edit { it[KEY_BUILD_CONFIG] = json }
     suspend fun saveBuildPlansJson(json: String) = context.dataStore.edit { it[KEY_BUILD_PLANS] = json }
     suspend fun saveBuildQueueJson(json: String) = context.dataStore.edit { it[KEY_BUILD_QUEUE] = json }
-    suspend fun saveModuleCatalogRepositoriesJson(json: String) = context.dataStore.edit {
-        it[KEY_MODULE_CATALOG_REPOSITORIES] = json
+    suspend fun saveRuntimeModuleRepositoriesJson(json: String) = context.dataStore.edit {
+        it[KEY_RUNTIME_MODULE_REPOSITORIES] = json
+    }
+    suspend fun saveBuildModuleRepositoriesJson(json: String) = context.dataStore.edit {
+        it[KEY_BUILD_MODULE_REPOSITORIES] = json
     }
     suspend fun saveDownloadedArtifactsJson(json: String) = context.dataStore.edit { it[KEY_DOWNLOADED_ARTIFACTS] = json }
     suspend fun saveRemoteArtifactsJson(json: String) = context.dataStore.edit { it[KEY_REMOTE_ARTIFACTS] = json }

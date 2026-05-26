@@ -167,8 +167,8 @@ fun BuildScreen(
     var editingCustomModuleStages by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var removingCustomModuleKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val coroutineScope = rememberCoroutineScope()
-    val catalogModules = remember(state.moduleCatalogRepositories) {
-        mergeBuildCatalogModules(state.moduleCatalogRepositories)
+    val catalogModules = remember(state.buildModuleRepositories) {
+        mergeBuildCatalogModules(state.buildModuleRepositories)
     }
     val catalogModuleByUrl = remember(catalogModules) {
         catalogModules.associateBy { it.module.repoUrl.trim().lowercase() }

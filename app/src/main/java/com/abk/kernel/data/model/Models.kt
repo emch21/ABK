@@ -323,6 +323,25 @@ data class ModuleCatalogItem(
     val homepage: String = ""
 )
 
+data class RuntimeModuleCatalogItem(
+    val id: String = "",
+    val name: String = "",
+    val version: String = "",
+    val versionCode: Long = 0L,
+    val author: String = "",
+    val description: String = "",
+    val zipUrl: String = "",
+    val changelog: String = "",
+    val support: String = "",
+    val donate: String = "",
+    val website: String = "",
+    val cover: String = "",
+    val icon: String = "",
+    val verified: Boolean = false,
+    val minApi: Int? = null,
+    val maxApi: Int? = null
+)
+
 data class ModuleCatalogRepository(
     val id: String = "",
     val url: String = "",
@@ -334,10 +353,28 @@ data class ModuleCatalogRepository(
     val skippedCount: Int = 0
 )
 
+data class RuntimeModuleRepository(
+    val id: String = "",
+    val url: String = "",
+    val indexJsonUrl: String = "",
+    val name: String = "",
+    val modules: List<RuntimeModuleCatalogItem> = emptyList(),
+    val lastUpdated: Long = 0L,
+    val error: String? = null,
+    val skippedCount: Int = 0
+)
+
 data class ModuleCatalogFetchResult(
     val name: String,
     val indexUrl: String,
     val modules: List<ModuleCatalogItem>,
+    val skippedCount: Int
+)
+
+data class RuntimeModuleCatalogFetchResult(
+    val name: String,
+    val indexUrl: String,
+    val modules: List<RuntimeModuleCatalogItem>,
     val skippedCount: Int
 )
 
