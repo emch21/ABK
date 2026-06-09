@@ -114,7 +114,7 @@ sukisu=
 
 在 GitHub Actions 与 App 的 GKI 构建界面中，**Latest(最新)** 位于 **Dev** 与 **Custom** 之间，由 [`resolve-ksu-ref.sh`](.github/scripts/resolve-ksu-ref.sh) 在运行时解析上游 KernelSU 来源：
 
-- **Official / SukiSU / ReSukiSU（GKI）：** 内核与管理器共用上游 `main` 上最近一次成功的 `build-manager` 的 `head_sha`（非分支 HEAD）。管理器经 [nightly.link](https://nightly.link/) 拉取（`manager.zip` 或 `Manager-release.zip`）。若 `main` 上无成功的 `build-manager`，Latest 解析阶段直接失败。
+- **Official / SukiSU / ReSukiSU（GKI）：** 优先使用上游 `main` 的 **HEAD**，当该提交存在成功的 `release.yml`（标签发布）或独立的 `build-manager.yml` 时，内核与管理器共用该 `head_sha`；否则回退到 `main` 上最近一次成功的独立 `build-manager`。管理器经 [nightly.link](https://nightly.link/) 拉取（`manager.zip` 或 `Manager-release.zip`）；下载时同样会查找 `release.yml` 的 run。若 `main` 上两者皆无可用 CI，Latest 解析失败。
 
 若管理器下载失败，管理器 job 对应步骤会失败，但**内核构建仍会继续**。Latest 不会回退到 `releases/latest`（Stable/Dev 用的发布包路径）。
 
@@ -237,9 +237,9 @@ App 编译工作流（`Build ABK App` / `Build ABK App (dev)`）通过仓库变�
 
 ## 贡献者
 
-以下列表按当前 git 历史统计，仅展示可识别的 GitHub 用户名/链接，并过滤自动化账号：
+以下列表按当前 git 历史归一化到可识别的 GitHub 用户名/链接，并按用户名排序；自动化账号与无法可靠映射的身份已过滤：
 
-[@TheWildJames](https://github.com/TheWildJames)、[@zzh20188](https://github.com/zzh20188)、[@xingguangcuican6666](https://github.com/xingguangcuican6666)、[@ShirkNeko](https://github.com/ShirkNeko)、[@huime180](https://github.com/huime180)、[@MiRinChan](https://github.com/MiRinChan)、[@FunLay123](https://github.com/FunLay123)、[@guruji-byte](https://github.com/guruji-byte)、[@Xiaomichael](https://github.com/Xiaomichael)、[@DreamFerry](https://github.com/DreamFerry)、[@liqideqq](https://github.com/liqideqq)、[@elysias123](https://github.com/elysias123)、[@Fede2782](https://github.com/Fede2782)、[@ReeViiS69](https://github.com/ReeViiS69)、[@TheSillyOk](https://github.com/TheSillyOk)、[@prpjzz](https://github.com/prpjzz)、[@ukriu](https://github.com/ukriu)、[@wrnxr233](https://github.com/wrnxr233)、[@Tools-cx-app](https://github.com/Tools-cx-app)、[@Akuma-Noko](https://github.com/Akuma-Noko)、[@DebugBoard](https://github.com/DebugBoard)、[@FixeQyt](https://github.com/FixeQyt)、[@LX200944](https://github.com/LX200944)、[@Starsun](https://github.com/Starsun)、[@yx1234587](https://github.com/yx1234587)。
+[@Akuma-Noko](https://github.com/Akuma-Noko)、[@DebugBoard](https://github.com/DebugBoard)、[@DreamFerry](https://github.com/DreamFerry)、[@elysias123](https://github.com/elysias123)、[@Fede2782](https://github.com/Fede2782)、[@FixeQyt](https://github.com/FixeQyt)、[@FunLay123](https://github.com/FunLay123)、[@gsf114](https://github.com/gsf114)、[@guruji-byte](https://github.com/guruji-byte)、[@huime180](https://github.com/huime180)、[@liqideqq](https://github.com/liqideqq)、[@LX200944](https://github.com/LX200944)、[@Mazha0309](https://github.com/Mazha0309)、[@MiRinChan](https://github.com/MiRinChan)、[@prpjzz](https://github.com/prpjzz)、[@ReeViiS69](https://github.com/ReeViiS69)、[@ShirkNeko](https://github.com/ShirkNeko)、[@Starsun](https://github.com/Starsun)、[@TheSillyOk](https://github.com/TheSillyOk)、[@TheWildJames](https://github.com/TheWildJames)、[@Tools-cx-app](https://github.com/Tools-cx-app)、[@ukriu](https://github.com/ukriu)、[@wrnxr233](https://github.com/wrnxr233)、[@Xiaomichael](https://github.com/Xiaomichael)、[@xingguangcuican6666](https://github.com/xingguangcuican6666)、[@yx1234587](https://github.com/yx1234587)、[@zzh20188](https://github.com/zzh20188)。
 
 ## 开放源代码许可
 
@@ -249,7 +249,7 @@ App 编译工作流（`Build ABK App` / `Build ABK App (dev)`）通过仓库变�
 
 | 组件 | 来源 | 许可证 |
 | --- | --- | --- |
-| AnyBase Kernel | [`LICENSE`](LICENSE) | GPL-2.0 |
+| AnyBase Kernel | [`LICENSE`](LICENSE) | GPL-3.0 |
 | ABK Control native bridge | `app/src/main/cpp/uapi/abk_control.h` | GPL-2.0 |
 | xingguang DDK module | `ddk/xingguang-ddk/xingguang_ddk.c` | GPL |
 | DDK kernel API patch | `ddk/patches/xingguang-ddk/0001-xingguang-ddk-api.patch` | GPL-2.0 |
@@ -312,4 +312,4 @@ Web 依赖来自 `web/package-lock.json`。
 
 ## License
 
-ABK 本仓库按 GPL-2.0 发布。使用、分发或修改仓库中的第三方项目、补丁、二进制来源和依赖包前，请分别遵守对应上游项目的许可证和使用条款。使用 ABK、工作流、自定义模块或构建产物造成的设备损坏、数据丢失、账号风险、服务中断、合规问题或任何直接/间接损失，均由使用者自行承担。
+ABK 本仓库按 GPL-3.0 发布。使用、分发或修改仓库中的第三方项目、补丁、二进制来源和依赖包前，请分别遵守对应上游项目的许可证和使用条款。使用 ABK、工作流、自定义模块或构建产物造成的设备损坏、数据丢失、账号风险、服务中断、合规问题或任何直接/间接损失，均由使用者自行承担。
