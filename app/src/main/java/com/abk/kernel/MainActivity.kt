@@ -83,6 +83,7 @@ import coil.compose.AsyncImage
 import com.abk.kernel.ui.components.AbkSnackbarHost
 import com.abk.kernel.ui.components.animateBottomNavForChildPage
 import com.abk.kernel.ui.components.showAbkSnackbar
+import com.abk.kernel.extensions.AbkExtensionBootstrapActivity
 import com.abk.kernel.ui.screens.BuildScreen
 import com.abk.kernel.ui.screens.FlashScreen
 import com.abk.kernel.ui.screens.InstalledModulesScreen
@@ -116,6 +117,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val vm: MainViewModel = viewModel()
             val state by vm.uiState.collectAsState()
+            var extensionBootstrapIssued by rememberSaveable { mutableStateOf(false) }
 
             LaunchedEffect(Unit) {
                 vm.checkRoot()
@@ -130,6 +132,17 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(state.termsAccepted, state.oobeCompleted) {
                 if (state.termsAccepted && !state.oobeCompleted) {
                     vm.maybeShowInitialOobe()
+                }
+            }
+
+            LaunchedEffect(state.termsAccepted, state.showOobe, extensionBootstrapIssued) {
+                if (state.termsAccepted && !state.showOobe && !extensionBootstrapIssued) {
+                    extensionBootstrapIssued = true
+                    startActivity(
+                        Intent(this@MainActivity, AbkExtensionBootstrapActivity::class.java).apply {
+                            putExtra("boot_action", "foreground")
+                        }
+                    )
                 }
             }
 

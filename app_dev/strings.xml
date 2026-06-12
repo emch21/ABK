@@ -205,6 +205,14 @@
     <string name="build_kpm_password_placeholder">留空使用默认密码</string>
     <string name="build_custom_modules">自定义外部模块</string>
     <string name="build_enable_custom_modules">启用自定义外部模块</string>
+    <string name="extension_invalid_id">扩展 ID 无效</string>
+    <string name="extension_asset_missing">未找到扩展安装资产</string>
+    <string name="extension_download_missing">扩展未声明下载地址</string>
+    <string name="extension_install_success">%1$s 安装完成</string>
+    <string name="extension_install_failed">扩展安装失败</string>
+    <string name="extension_oobe_missing">扩展未声明 OOBE 入口</string>
+    <string name="extension_settings_missing">扩展未声明设置入口</string>
+    <string name="extension_launch_failed">扩展启动失败</string>
     <string name="build_add_from_module_repo">从模块仓库添加</string>
     <string name="build_manual_add">手动添加</string>
     <string name="build_repo_url">仓库链接</string>
@@ -553,6 +561,9 @@
     <string name="settings_build">构建</string>
     <string name="settings_notification">通知</string>
     <string name="settings_about">关于</string>
+    <string name="settings_extensions_title">扩展</string>
+    <string name="settings_extensions_manage">管理扩展</string>
+    <string name="settings_extensions_manage_desc">查看已注入扩展、安装伴生应用、重跑 OOBE 与打开扩展设置。</string>
     <string name="settings_version">版本</string>
     <string name="settings_source_repo">源仓库</string>
     <string name="settings_workflow_foreground_refresh">自动刷新 Workflow</string>

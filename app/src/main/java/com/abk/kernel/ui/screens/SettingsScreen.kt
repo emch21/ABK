@@ -48,6 +48,7 @@ import androidx.core.graphics.ColorUtils
 import coil.compose.AsyncImage
 import com.abk.kernel.BuildConfig
 import com.abk.kernel.R
+import com.abk.kernel.extensions.AbkExtensionManagerActivity
 import com.abk.kernel.utils.DownloadDirectoryUtils
 import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.LocaleHelper
@@ -771,6 +772,20 @@ private fun SettingsMainContent(
                     )
                 },
                 onClick = onOpenThemeSettings
+            )
+        }
+
+        SettingsGroup(title = stringResource(R.string.settings_extensions_title)) {
+            ExpressiveListItem(
+                title = stringResource(R.string.settings_extensions_manage),
+                subtitle = stringResource(R.string.settings_extensions_manage_desc),
+                leadingIcon = Icons.Default.Extension,
+                trailingContent = {
+                    Icon(Icons.Default.ChevronRight, contentDescription = null)
+                },
+                onClick = {
+                    context.startActivity(Intent(context, AbkExtensionManagerActivity::class.java))
+                }
             )
         }
 
