@@ -69,6 +69,7 @@ import com.abk.kernel.data.model.isKernelBuild
 import com.abk.kernel.data.model.isManagerBuild
 import com.abk.kernel.data.model.isManagerDevBuild
 import com.abk.kernel.ui.components.AbkScreenHorizontalPadding
+import com.abk.kernel.ui.components.AppPageBackground
 import com.abk.kernel.ui.components.ObserveChildPageVisibility
 import com.abk.kernel.ui.components.childPageOverlayEnterTransition
 import com.abk.kernel.ui.components.childPageOverlayExitTransition
@@ -82,6 +83,7 @@ import com.abk.kernel.ui.components.ExpressiveSectionCard
 import com.abk.kernel.ui.components.ExpressiveStatusChip
 import com.abk.kernel.ui.components.ExpressiveSwitchItem
 import com.abk.kernel.ui.components.ExpressiveTopBar
+import com.abk.kernel.ui.theme.appPageBackgroundColor
 import com.abk.kernel.ui.theme.uiSurfaceColor
 import com.abk.kernel.viewmodel.BuildPlanImportPreview
 import com.abk.kernel.viewmodel.BuildPlanShareScope
@@ -101,7 +103,8 @@ private const val CATALOG_MODULE_REMOVE_DELAY_MS = 260L
 fun BuildScreen(
     vm: MainViewModel,
     outerPadding: PaddingValues = PaddingValues(0.dp),
-    onPlanPageVisibleChange: (Boolean) -> Unit = {}
+    onPlanPageVisibleChange: (Boolean) -> Unit = {},
+    onNavigateToStatus: () -> Unit = {}
 ) {
     val state by vm.uiState.collectAsState()
     val context = LocalContext.current
@@ -137,6 +140,7 @@ fun BuildScreen(
         buildTimePreview(context, config.buildTime)
     }
     var showConfirmDialog by remember { mutableStateOf(false) }
+    var showBuildSubmittedDialog by rememberSaveable { mutableStateOf(false) }
     var showSavePlanDialog by remember { mutableStateOf(false) }
     var showImportPlanDialog by remember { mutableStateOf(false) }
     var showPlanLibraryPage by rememberSaveable { mutableStateOf(false) }
@@ -267,6 +271,34 @@ fun BuildScreen(
         }
     }
 
+
+    if (showBuildSubmittedDialog) {
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(Icons.Default.CheckCircle, contentDescription = null) },
+            title = {
+                Text(
+                    text = stringResource(R.string.build_submitted_title),
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = { Text(stringResource(R.string.build_submitted_desc)) },
+            confirmButton = {
+                FilledTonalButton(onClick = {
+                    showBuildSubmittedDialog = false
+                    onNavigateToStatus()
+                }) {
+                    Text(stringResource(R.string.build_submitted_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBuildSubmittedDialog = false }) {
+                    Text(stringResource(R.string.close))
+                }
+            }
+        )
+    }
+
     if (showConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showConfirmDialog = false },
@@ -363,6 +395,7 @@ fun BuildScreen(
                 Button(onClick = {
                     showConfirmDialog = false
                     vm.dispatchBuild(config)
+                    showBuildSubmittedDialog = true
                 }) { Text(stringResource(R.string.confirm)) }
             },
             dismissButton = {
@@ -831,7 +864,7 @@ fun BuildScreen(
     if (!state.isLoggedIn || state.forkRepo == null) {
         val needsLogin = !state.isLoggedIn
         Scaffold(
-            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
+            containerColor = appPageBackgroundColor(uiSurfaceColor(MaterialTheme.colorScheme.surface)),
             topBar = {
                 ExpressiveTopBar(
                     title = stringResource(R.string.build_title),
@@ -911,7 +944,7 @@ fun BuildScreen(
             .height(maxHeight + childPageTopInset + childPageBottomInset)
             .offset(y = -childPageTopInset)
         Scaffold(
-            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
+            containerColor = appPageBackgroundColor(uiSurfaceColor(MaterialTheme.colorScheme.surface)),
             topBar = {
                 ExpressiveTopBar(
                     title = stringResource(R.string.build_title),
@@ -1688,32 +1721,10 @@ private fun BuildPlanPageBackground(
     backgroundUri: String?,
     backgroundImageEnabled: Boolean
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    val hasBackground = backgroundImageEnabled && !backgroundUri.isNullOrBlank()
-    val scrimColor = if (colorScheme.surface.luminance() > 0.5f) {
-        colorScheme.surface.copy(alpha = 0.28f)
-    } else {
-        Color.Black.copy(alpha = 0.38f)
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colorScheme.surface)
-    ) {
-        if (hasBackground) {
-            AsyncImage(
-                model = backgroundUri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(scrimColor)
-            )
-        }
-    }
+    AppPageBackground(
+        backgroundUri = backgroundUri,
+        backgroundImageEnabled = backgroundImageEnabled
+    )
 }
 
 @Composable

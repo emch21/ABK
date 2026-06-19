@@ -35,7 +35,8 @@ class AbkExtensionBootstrapActivity : ComponentActivity() {
                 return@launch
             }
 
-            if (pending.isCompanionInstalled && abkLaunchExtensionOobe(this@AbkExtensionBootstrapActivity, pending)) {
+            if (pending.canStartServiceSilently) {
+                abkLaunchExtensionServiceActivity(this@AbkExtensionBootstrapActivity, pending)
                 finish()
                 return@launch
             }

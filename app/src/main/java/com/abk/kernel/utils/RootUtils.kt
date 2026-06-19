@@ -5,6 +5,7 @@ import com.abk.kernel.R
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.pm.PackageManager.NameNotFoundException
 import android.os.Build
 import android.os.Environment
 import android.util.Base64
@@ -218,6 +219,7 @@ object RootUtils {
         val stagedApk = File(stageDir, "manager-${System.currentTimeMillis()}.apk")
         return try {
             source.copyTo(stagedApk, overwrite = true)
+            val archive = apkArchiveMetadata(context.packageManager, stagedApk.absolutePath)
             val safeApk = shellQuote(stagedApk.absolutePath)
             val script = """
                 echo "[ABK] 开始安装管理器 APK"
@@ -250,7 +252,23 @@ object RootUtils {
                 fi
                 exit "${'$'}rc"
             """.trimIndent()
-            execRootScript(script, timeoutSeconds = 240, onOutput = onOutput)
+            val result = execRootScript(script, timeoutSeconds = 240, onOutput = onOutput)
+            if (result.success || archive == null) {
+                result
+            } else {
+                val installedVersion = installedPackageVersionCode(
+                    context.packageManager,
+                    archive.packageName
+                )
+                if (shouldRecoverSuccessfulApkInstall(result.output, archive.versionCode, installedVersion)) {
+                    ShellResult(
+                        success = true,
+                        output = result.output + "[ABK] 安装后校验通过：${archive.packageName} 已实际安装，忽略 shell 收尾失败"
+                    )
+                } else {
+                    result
+                }
+            }
         } catch (error: Exception) {
             val line = error.message ?: error::class.java.simpleName
             onOutput?.invoke(line)
@@ -562,6 +580,52 @@ object RootUtils {
             }
         }
         return execRootScript(args, timeoutSeconds = 20L)
+    }
+
+    fun launchServiceAsRoot(
+        componentName: String,
+        extras: Map<String, String> = emptyMap(),
+        foreground: Boolean = true
+    ): ShellResult {
+        if (componentName.isBlank()) {
+            return ShellResult(false, listOf(tr(R.string.extension_launch_failed)))
+        }
+        val action = if (foreground) "start-foreground-service" else "startservice"
+        val args = buildString {
+            append("am ")
+            append(action)
+            append(" -n ")
+            append(shellQuote(componentName))
+            extras.forEach { (key, value) ->
+                append(" --es ")
+                append(shellQuote(key))
+                append(" ")
+                append(shellQuote(value))
+            }
+        }
+        val primary = execRootScript(args, timeoutSeconds = 20L)
+        if (primary.success || !foreground) {
+            return primary
+        }
+        val fallbackArgs = buildString {
+            append("am startservice -n ")
+            append(shellQuote(componentName))
+            extras.forEach { (key, value) ->
+                append(" --es ")
+                append(shellQuote(key))
+                append(" ")
+                append(shellQuote(value))
+            }
+        }
+        val fallback = execRootScript(fallbackArgs, timeoutSeconds = 20L)
+        return if (fallback.success) {
+            fallback
+        } else {
+            ShellResult(
+                success = false,
+                output = primary.output + fallback.output
+            )
+        }
     }
 
     fun readForegroundPackage(): String? {
@@ -1149,6 +1213,11 @@ object RootUtils {
     private fun isAbkMetaMountModuleDir(moduleDir: String): Boolean =
         moduleDir.trim().trimEnd('/') == ABK_META_MOUNT_DIR
 
+    private data class ApkArchiveMetadata(
+        val packageName: String,
+        val versionCode: Long?
+    )
+
     @Suppress("DEPRECATION")
     private fun installedApplications(packageManager: PackageManager): List<ApplicationInfo> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1156,6 +1225,59 @@ object RootUtils {
         } else {
             packageManager.getInstalledApplications(0)
         }
+
+    @Suppress("DEPRECATION")
+    private fun apkArchiveMetadata(packageManager: PackageManager, apkPath: String): ApkArchiveMetadata? {
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageArchiveInfo(apkPath, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            packageManager.getPackageArchiveInfo(apkPath, 0)
+        } ?: return null
+        val packageName = info.packageName?.trim().orEmpty()
+        if (packageName.isBlank()) return null
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            info.versionCode.toLong()
+        }
+        return ApkArchiveMetadata(packageName, versionCode)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun installedPackageVersionCode(
+        packageManager: PackageManager,
+        packageName: String
+    ): Long? {
+        if (packageName.isBlank()) return null
+        return try {
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                packageManager.getPackageInfo(packageName, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                info.versionCode.toLong()
+            }
+        } catch (_: NameNotFoundException) {
+            null
+        }
+    }
+
+    internal fun shouldRecoverSuccessfulApkInstall(
+        output: List<String>,
+        expectedVersionCode: Long?,
+        installedVersionCode: Long?
+    ): Boolean {
+        val sawInstallSuccess = output.any { line ->
+            val clean = line.trim()
+            clean == "Success" || clean.contains("管理器 APK 安装完成")
+        }
+        if (!sawInstallSuccess) return false
+        if (installedVersionCode == null) return false
+        return expectedVersionCode == null || installedVersionCode == expectedVersionCode
+    }
 
     private fun setProfileSepolicy(packageName: String, rules: String): Boolean {
         if (packageName.isBlank()) return false

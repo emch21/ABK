@@ -48,11 +48,12 @@ import androidx.core.graphics.ColorUtils
 import coil.compose.AsyncImage
 import com.abk.kernel.BuildConfig
 import com.abk.kernel.R
-import com.abk.kernel.extensions.AbkExtensionManagerActivity
+import com.abk.kernel.extensions.AbkExtensionManagerScreen
 import com.abk.kernel.utils.DownloadDirectoryUtils
 import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.LocaleHelper
 import com.abk.kernel.ui.components.AbkScreenHorizontalPadding
+import com.abk.kernel.ui.components.AppPageBackground
 import com.abk.kernel.ui.components.ObserveChildPageVisibility
 import com.abk.kernel.ui.components.childPageOverlayEnterTransition
 import com.abk.kernel.ui.components.childPageOverlayExitTransition
@@ -65,6 +66,7 @@ import com.abk.kernel.ui.components.ExpressiveSectionCard
 import com.abk.kernel.ui.components.ExpressiveStatusChip
 import com.abk.kernel.ui.components.ExpressiveSwitchItem
 import com.abk.kernel.ui.components.ExpressiveTopBar
+import com.abk.kernel.ui.theme.appPageBackgroundColor
 import com.abk.kernel.ui.theme.uiSurfaceColor
 import com.abk.kernel.data.model.APP_UPDATE_LINE_DEV
 import com.abk.kernel.data.model.APP_UPDATE_LINE_NORMAL
@@ -84,7 +86,7 @@ import java.io.File
 fun SettingsScreen(
     vm: MainViewModel,
     outerPadding: PaddingValues = PaddingValues(0.dp),
-    onThemePageVisibleChange: (Boolean) -> Unit = {},
+    onChildPageVisibleChange: (Boolean) -> Unit = {},
     onOpenInstalledModules: () -> Unit = {}
 ) {
     val state by vm.uiState.collectAsState()
@@ -95,9 +97,10 @@ fun SettingsScreen(
     var showManagerTools by rememberSaveable { mutableStateOf(false) }
     var showAboutPage by rememberSaveable { mutableStateOf(false) }
     var showOpenSourceLicenses by rememberSaveable { mutableStateOf(false) }
+    var showExtensionManagerPage by rememberSaveable { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val showChildPage = showThemeSettings || showAppProfileTemplates || showManagerTools ||
-        showAboutPage || showOpenSourceLicenses
+        showAboutPage || showOpenSourceLicenses || showExtensionManagerPage
     val childPageTransition = rememberChildPageOverlayTransition(
         visible = showChildPage,
         label = "settings-child-page"
@@ -127,6 +130,7 @@ fun SettingsScreen(
         showManagerTools = false
         showAboutPage = false
         showOpenSourceLicenses = false
+        showExtensionManagerPage = false
     }
 
     val childPageBack = rememberChildPageBackController(
@@ -137,12 +141,12 @@ fun SettingsScreen(
 
     ObserveChildPageVisibility(
         transition = childPageTransition,
-        onVisibleChange = onThemePageVisibleChange,
+        onVisibleChange = onChildPageVisibleChange,
         onAfterExitAnimation = { childPageBack.resetProgress() }
     )
 
     DisposableEffect(Unit) {
-        onDispose { onThemePageVisibleChange(false) }
+        onDispose { onChildPageVisibleChange(false) }
     }
 
     fun openThemeSettings() {
@@ -151,6 +155,7 @@ fun SettingsScreen(
         showManagerTools = false
         showAboutPage = false
         showOpenSourceLicenses = false
+        showExtensionManagerPage = false
         showThemeSettings = true
     }
 
@@ -160,6 +165,7 @@ fun SettingsScreen(
         showManagerTools = false
         showAboutPage = false
         showOpenSourceLicenses = false
+        showExtensionManagerPage = false
         showAppProfileTemplates = true
         vm.refreshAppProfileTemplates()
     }
@@ -170,6 +176,7 @@ fun SettingsScreen(
         showAppProfileTemplates = false
         showAboutPage = false
         showOpenSourceLicenses = false
+        showExtensionManagerPage = false
         showManagerTools = true
         vm.refreshManagerTools(force = true)
     }
@@ -180,6 +187,7 @@ fun SettingsScreen(
         showAppProfileTemplates = false
         showManagerTools = false
         showOpenSourceLicenses = false
+        showExtensionManagerPage = false
         showAboutPage = true
     }
 
@@ -189,7 +197,18 @@ fun SettingsScreen(
         showAppProfileTemplates = false
         showManagerTools = false
         showAboutPage = false
+        showExtensionManagerPage = false
         showOpenSourceLicenses = true
+    }
+
+    fun openExtensionManagerPage() {
+        childPageBack.resetProgress()
+        showThemeSettings = false
+        showAppProfileTemplates = false
+        showManagerTools = false
+        showAboutPage = false
+        showOpenSourceLicenses = false
+        showExtensionManagerPage = true
     }
 
     if (showLogoutDialog) {
@@ -218,7 +237,7 @@ fun SettingsScreen(
             .height(maxHeight + childPageTopInset + childPageBottomInset)
             .offset(y = -childPageTopInset)
         Scaffold(
-            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
+            containerColor = appPageBackgroundColor(uiSurfaceColor(MaterialTheme.colorScheme.surface)),
             topBar = {
                 ExpressiveTopBar(
                     title = stringResource(R.string.settings_title),
@@ -238,7 +257,8 @@ fun SettingsScreen(
                 onOpenManagerTools = ::openManagerTools,
                 onOpenInstalledModules = onOpenInstalledModules,
                 onAbout = ::openAboutPage,
-                onOpenSourceLicenses = ::openOpenSourceLicenses
+                onOpenSourceLicenses = ::openOpenSourceLicenses,
+                onOpenExtensionManager = ::openExtensionManagerPage
             )
         }
 
@@ -349,6 +369,31 @@ fun SettingsScreen(
                         onDelete = vm::deleteAppProfileTemplate
                     )
                 }
+            }
+        }
+
+        childPageTransition.AnimatedVisibility(
+            visible = { it && showExtensionManagerPage },
+            enter = childPageOverlayEnterTransition(state.predictiveBackEnabled, motionScheme),
+            exit = childPageOverlayExitTransition(state.predictiveBackEnabled, motionScheme),
+            modifier = childPageModifier
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(childPageBack.backTransformModifier())
+            ) {
+                SettingsPageBackground(
+                    backgroundUri = state.customBackgroundUri,
+                    backgroundImageEnabled = state.backgroundImageEnabled
+                )
+                AbkExtensionManagerScreen(
+                    focusExtensionId = null,
+                    bootstrapMode = false,
+                    onBack = childPageBack::requestDismiss,
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = Color.Transparent,
+                )
             }
         }
 
@@ -476,32 +521,10 @@ private fun SettingsPageBackground(
     backgroundUri: String?,
     backgroundImageEnabled: Boolean
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    val hasBackground = backgroundImageEnabled && !backgroundUri.isNullOrBlank()
-    val scrimColor = if (colorScheme.surface.luminance() > 0.5f) {
-        colorScheme.surface.copy(alpha = 0.28f)
-    } else {
-        Color.Black.copy(alpha = 0.38f)
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colorScheme.surface)
-    ) {
-        if (hasBackground) {
-            AsyncImage(
-                model = backgroundUri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(scrimColor)
-            )
-        }
-    }
+    AppPageBackground(
+        backgroundUri = backgroundUri,
+        backgroundImageEnabled = backgroundImageEnabled
+    )
 }
 
 @Composable
@@ -517,7 +540,8 @@ private fun SettingsMainContent(
     onOpenManagerTools: () -> Unit,
     onOpenInstalledModules: () -> Unit,
     onAbout: () -> Unit,
-    onOpenSourceLicenses: () -> Unit
+    onOpenSourceLicenses: () -> Unit,
+    onOpenExtensionManager: () -> Unit
 ) {
     val context = LocalContext.current
     Column(
@@ -783,9 +807,7 @@ private fun SettingsMainContent(
                 trailingContent = {
                     Icon(Icons.Default.ChevronRight, contentDescription = null)
                 },
-                onClick = {
-                    context.startActivity(Intent(context, AbkExtensionManagerActivity::class.java))
-                }
+                onClick = onOpenExtensionManager
             )
         }
 
