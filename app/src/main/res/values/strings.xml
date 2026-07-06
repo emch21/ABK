@@ -629,6 +629,11 @@
     <string name="settings_enter_color_appearance">进入颜色与外观</string>
     <string name="settings_about_desc">本仓库入口、版本信息与贡献者</string>
     <string name="settings_enter_about">进入关于</string>
+    <string name="settings_export_diagnostics">导出诊断包</string>
+    <string name="settings_export_diagnostics_desc">打包本次启动中的 ABK 日志、内核日志、模块状态与模块日志并分享 zip</string>
+    <string name="settings_export_diagnostics_share">分享诊断包</string>
+    <string name="settings_export_diagnostics_partial">诊断包已生成，但有 %1$d 项采集失败</string>
+    <string name="settings_export_diagnostics_failed">诊断包导出失败：%1$s</string>
     <string name="settings_open_source_licenses">开放源代码许可</string>
     <string name="settings_open_source_licenses_desc">本仓库引用、内嵌源码和依赖包的许可证清单</string>
     <string name="settings_enter_open_source_licenses">进入开放源代码许可</string>
@@ -872,6 +877,12 @@
     <string name="root_auth_use_default_non_root">使用默认非 Root 配置</string>
     <string name="root_auth_building_list">正在构建授权列表</string>
     <string name="root_auth_refreshing_list">正在刷新授权列表</string>
+    <string name="root_auth_loading_profile">正在读取应用配置</string>
+    <string name="root_auth_recovery_title">超级用户配置已重置</string>
+    <string name="root_auth_recovery_reset_message">检测到上次读取“%1$s”的超级用户配置时导致 ABK 崩溃，现已将该应用的 profile 重置为安全默认值。</string>
+    <string name="root_auth_recovery_reset_failed_message">检测到上次读取“%1$s”的超级用户配置时导致 ABK 崩溃，但这次未能自动重置该应用的 profile。请确认管理器权限后重试。</string>
+    <string name="root_auth_profile_read_disabled_title">已禁用原生配置读取</string>
+    <string name="root_auth_profile_read_disabled_message">该应用之前读取原生 profile 时会导致 ABK 崩溃。当前页面使用安全默认值，不再尝试原生读取。</string>
     <string name="save">保存</string>
 
     <!-- Module repository -->

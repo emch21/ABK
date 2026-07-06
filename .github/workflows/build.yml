@@ -4114,7 +4114,8 @@ jobs:
               )
               if not region_pattern.search(text):
                   raise SystemExit(f"{path} 缺少 Official sucompat execveat 兼容替换锚点")
-              text = region_pattern.sub(replacement, text, count=1)
+              # Keep C escape sequences literal; re.sub() would reinterpret \n in the replacement text.
+              text = region_pattern.sub(lambda _match: replacement, text, count=1)
 
               if text != original:
                   path.write_text(text)

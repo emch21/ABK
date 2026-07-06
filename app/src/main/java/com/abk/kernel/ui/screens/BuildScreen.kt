@@ -69,6 +69,8 @@ import com.abk.kernel.data.model.isKernelBuild
 import com.abk.kernel.data.model.isManagerBuild
 import com.abk.kernel.data.model.isManagerDevBuild
 import com.abk.kernel.ui.components.AbkScreenHorizontalPadding
+import com.abk.kernel.ui.components.AbkSegmentedButtonOption
+import com.abk.kernel.ui.components.AbkSingleChoiceSegmentedButtonRow
 import com.abk.kernel.ui.components.AppPageBackground
 import com.abk.kernel.ui.components.ObserveChildPageVisibility
 import com.abk.kernel.ui.components.childPageOverlayEnterTransition
@@ -2373,31 +2375,27 @@ private fun BuildTargetSelector(
     selected: String,
     onSelect: (String) -> Unit
 ) {
+    val options = listOf(
+        AbkSegmentedButtonOption(
+            value = BUILD_TARGET_GKI,
+            label = buildTargetLabel(BUILD_TARGET_GKI)
+        ),
+        AbkSegmentedButtonOption(
+            value = BUILD_TARGET_ONEPLUS,
+            label = buildTargetLabel(BUILD_TARGET_ONEPLUS)
+        )
+    )
     ExpressiveSectionCard(
         title = stringResource(R.string.build_target_title),
         subtitle = stringResource(R.string.build_target_desc),
         icon = Icons.Default.AccountTree
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(BUILD_TARGET_GKI, BUILD_TARGET_ONEPLUS).forEach { target ->
-                FilterChip(
-                    selected = selected == target,
-                    onClick = { onSelect(target) },
-                    label = { Text(buildTargetLabel(target), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = if (target == BUILD_TARGET_ONEPLUS) Icons.Default.PhoneAndroid else Icons.Default.Memory,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
+        AbkSingleChoiceSegmentedButtonRow(
+            options = options,
+            selectedValue = selected,
+            onSelect = onSelect,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
