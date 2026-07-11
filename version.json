@@ -1,14 +1,14 @@
 {
   "stable": {
     "normal": {
-      "versionName": "1.2.3",
-      "versionCode": 10023,
-      "downloadUrl": "https://github.com/xingguangcuican6666/ABK/releases/download/app_v1.2.4/abk-app-abk-apks.zip"
+      "versionName": "1.2.5",
+      "versionCode": 10025,
+      "downloadUrl": "https://github.com/xingguangcuican6666/ABK/releases/download/app_v1.2.5/abk-app-abk-apks.zip"
     },
     "dev": {
-      "versionName": "1.2.3-dev",
-      "versionCode": 10023,
-      "downloadUrl": "https://github.com/xingguangcuican6666/ABK/releases/download/app_v1.2.4/abk-app-dev-abk-apks.zip"
+      "versionName": "1.2.5-dev",
+      "versionCode": 10025,
+      "downloadUrl": "https://github.com/xingguangcuican6666/ABK/releases/download/app_v1.2.5/abk-app-dev-abk-apks.zip"
     }
   },
   "unstable": {
@@ -16,21 +16,21 @@
       "versionName": "1.2.5",
       "versionCode": 10025,
       "downloadUrl": "https://nightly.link/xingguangcuican6666/ABK/workflows/build-abk-app/dev/abk-apks.zip",
-      "publishedAt": "2026-07-10T11:56:09Z",
-      "buildTimestampEpochMillis": 1783684569000,
+      "publishedAt": "2026-07-11T08:34:23Z",
+      "buildTimestampEpochMillis": 1783758863000,
       "sourceWorkflow": "Build ABK App",
-      "commitSha": "df6d1521ccb4c54125b6a3a971ad6c0d18a4ea3b",
-      "runId": 29090951161
+      "commitSha": "e6bbe288ff17fba9924f94195d9b59f8ba10a6b0",
+      "runId": 29146322631
     },
     "dev": {
       "versionName": "1.2.5",
       "versionCode": 10025,
       "downloadUrl": "https://nightly.link/xingguangcuican6666/ABK/workflows/build-abk-app-dev/dev/abk-apks.zip",
-      "publishedAt": "2026-07-10T11:56:18Z",
-      "buildTimestampEpochMillis": 1783684578000,
+      "publishedAt": "2026-07-11T08:34:23Z",
+      "buildTimestampEpochMillis": 1783758863000,
       "sourceWorkflow": "Build ABK App Dev",
-      "commitSha": "df6d1521ccb4c54125b6a3a971ad6c0d18a4ea3b",
-      "runId": 29090957666
+      "commitSha": "e6bbe288ff17fba9924f94195d9b59f8ba10a6b0",
+      "runId": 29146322673
     }
   }
 }

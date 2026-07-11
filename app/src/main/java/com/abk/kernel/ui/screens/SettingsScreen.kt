@@ -85,6 +85,7 @@ import com.abk.kernel.data.model.APP_UPDATE_STABILITY_STABLE
 import com.abk.kernel.data.model.APP_UPDATE_STABILITY_UNSTABLE
 import com.abk.kernel.data.model.AppUpdateCheckResult
 import com.abk.kernel.data.repository.PreferencesRepository
+import com.abk.kernel.data.repository.Result
 import com.abk.kernel.data.model.ManagerSettingItem
 import com.abk.kernel.data.model.ManagerSettingKind
 import com.abk.kernel.data.model.normalizeAppUpdateLine
@@ -93,7 +94,10 @@ import com.abk.kernel.viewmodel.MainUiState
 import com.abk.kernel.viewmodel.MainViewModel
 import com.abk.kernel.viewmodel.exportDiagnosticBundle
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SettingsScreen(
@@ -738,6 +742,11 @@ private fun SettingsMainContent(
             }
         }
 
+        SecuritySettingsGroup(
+            state = state,
+            vm = vm,
+        )
+
         SettingsGroup(title = stringResource(R.string.settings_app_update)) {
             AppUpdateStabilityPicker(
                 selected = state.appUpdateStability,
@@ -1004,6 +1013,322 @@ private fun ManagerInjectedSettingsGroup(
             }
         }
     }
+}
+
+@Composable
+private fun SecuritySettingsGroup(
+    state: MainUiState,
+    vm: MainViewModel,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val canManageKeys = state.isLoggedIn && state.forkRepo != null
+    var showImportDialog by remember { mutableStateOf(false) }
+    var showDisableConfirm1 by remember { mutableStateOf(false) }
+    var showDisableConfirm2 by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
+    var importPublicKeyText by remember { mutableStateOf("") }
+    var importPrivateKeyText by remember { mutableStateOf("") }
+    var importError by remember { mutableStateOf<String?>(null) }
+    var importPickerTarget by remember { mutableStateOf<SecurityKeyImportTarget?>(null) }
+    val importKeyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val target = importPickerTarget ?: return@rememberLauncherForActivityResult
+        importPickerTarget = null
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = try {
+                readTextFromUri(context, uri)
+            } catch (_: Throwable) {
+                importError = context.getString(R.string.settings_security_import_read_failed)
+                return@launch
+            }
+            when (target) {
+                SecurityKeyImportTarget.PUBLIC -> importPublicKeyText = text
+                SecurityKeyImportTarget.PRIVATE -> importPrivateKeyText = text
+            }
+            importError = null
+        }
+    }
+    SettingsGroup(title = stringResource(R.string.settings_security)) {
+        SwitchSettingsItem(
+            icon = Icons.Default.VerifiedUser,
+            title = stringResource(R.string.settings_security_signing_title),
+            subtitle = when {
+                !canManageKeys -> stringResource(R.string.settings_security_requires_fork)
+                state.artifactSigningVerificationEnabled && state.artifactSigningConfigured ->
+                    stringResource(R.string.settings_security_status_enabled_configured)
+                state.artifactSigningVerificationEnabled ->
+                    stringResource(R.string.settings_security_status_enabled_pending)
+                else ->
+                    stringResource(R.string.settings_security_status_disabled)
+            },
+            checked = state.artifactSigningVerificationEnabled,
+            enabled = !state.artifactSigningOperationInFlight && canManageKeys,
+            onCheckedChange = { enabled ->
+                when {
+                    enabled -> vm.enableArtifactSigningVerification()
+                    else -> showDisableConfirm1 = true
+                }
+            }
+        )
+        ExpressiveListItem(
+            title = stringResource(R.string.settings_security_import_keys),
+            subtitle = when {
+                !canManageKeys -> stringResource(R.string.settings_security_requires_fork)
+                !state.artifactSigningVerificationEnabled -> stringResource(R.string.settings_security_import_requires_enabled)
+                else -> stringResource(R.string.settings_security_import_keys_desc)
+            },
+            leadingIcon = Icons.Default.UploadFile,
+            enabled = !state.artifactSigningOperationInFlight && canManageKeys && state.artifactSigningVerificationEnabled,
+            onClick = {
+                importPublicKeyText = ""
+                importPrivateKeyText = ""
+                importError = null
+                showImportDialog = true
+            }
+        )
+        ExpressiveListItem(
+            title = stringResource(R.string.settings_security_reset_keys),
+            subtitle = stringResource(R.string.settings_security_reset_keys_desc),
+            leadingIcon = Icons.Default.Key,
+            enabled = !state.artifactSigningOperationInFlight && state.artifactSigningVerificationEnabled && canManageKeys,
+            onClick = { showResetConfirm = true }
+        )
+        if (state.artifactSigningOperationInFlight) {
+            AbkInlineLoadingPill(
+                text = stringResource(R.string.settings_security_operation_running),
+                modifier = Modifier.fillMaxWidth(),
+                compact = false
+            )
+        }
+    }
+
+    if (showImportDialog) {
+        ImportArtifactSigningKeysDialog(
+            publicKeyText = importPublicKeyText,
+            privateKeyText = importPrivateKeyText,
+            error = importError,
+            importing = state.artifactSigningOperationInFlight,
+            onPublicKeyTextChange = {
+                importPublicKeyText = it
+                importError = null
+            },
+            onPrivateKeyTextChange = {
+                importPrivateKeyText = it
+                importError = null
+            },
+            onPickPublicKey = {
+                importPickerTarget = SecurityKeyImportTarget.PUBLIC
+                importKeyPicker.launch(arrayOf("text/*", "*/*"))
+            },
+            onPickPrivateKey = {
+                importPickerTarget = SecurityKeyImportTarget.PRIVATE
+                importKeyPicker.launch(arrayOf("text/*", "*/*"))
+            },
+            onImport = {
+                scope.launch {
+                    importError = null
+                    when (val result = vm.importArtifactSigningKeys(importPublicKeyText, importPrivateKeyText)) {
+                        is Result.Success -> {
+                            showImportDialog = false
+                            importPublicKeyText = ""
+                            importPrivateKeyText = ""
+                        }
+                        is Result.Error -> importError = result.message
+                        Result.Loading -> Unit
+                    }
+                }
+            },
+            onDismiss = {
+                if (!state.artifactSigningOperationInFlight) {
+                    showImportDialog = false
+                }
+            }
+        )
+    }
+
+    if (showDisableConfirm1) {
+        TimedConfirmationDialog(
+            title = stringResource(R.string.settings_security_disable_dialog_title_1),
+            message = stringResource(R.string.settings_security_disable_dialog_message_1),
+            confirmLabel = stringResource(R.string.confirm),
+            onDismiss = { showDisableConfirm1 = false },
+            onConfirm = {
+                showDisableConfirm1 = false
+                showDisableConfirm2 = true
+            }
+        )
+    }
+
+    if (showDisableConfirm2) {
+        TimedConfirmationDialog(
+            title = stringResource(R.string.settings_security_disable_dialog_title_2),
+            message = stringResource(R.string.settings_security_disable_dialog_message_2),
+            confirmLabel = stringResource(R.string.confirm),
+            onDismiss = { showDisableConfirm2 = false },
+            onConfirm = {
+                showDisableConfirm2 = false
+                vm.disableArtifactSigningVerification()
+            }
+        )
+    }
+
+    if (showResetConfirm) {
+        TimedConfirmationDialog(
+            title = stringResource(R.string.settings_security_reset_dialog_title),
+            message = stringResource(R.string.settings_security_reset_dialog_message),
+            confirmLabel = stringResource(R.string.confirm),
+            onDismiss = { showResetConfirm = false },
+            onConfirm = {
+                showResetConfirm = false
+                vm.resetArtifactSigningKeys()
+            }
+        )
+    }
+}
+
+@Composable
+private fun TimedConfirmationDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    delaySeconds: Int = 5,
+) {
+    var remainingSeconds by remember { mutableStateOf(delaySeconds) }
+    LaunchedEffect(Unit) {
+        while (remainingSeconds > 0) {
+            delay(1_000)
+            remainingSeconds -= 1
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Warning, null) },
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = remainingSeconds <= 0,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text(
+                    if (remainingSeconds > 0) {
+                        "$confirmLabel (${remainingSeconds}s)"
+                    } else {
+                        confirmLabel
+                    }
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+private enum class SecurityKeyImportTarget {
+    PUBLIC,
+    PRIVATE,
+}
+
+@Composable
+private fun ImportArtifactSigningKeysDialog(
+    publicKeyText: String,
+    privateKeyText: String,
+    error: String?,
+    importing: Boolean,
+    onPublicKeyTextChange: (String) -> Unit,
+    onPrivateKeyTextChange: (String) -> Unit,
+    onPickPublicKey: () -> Unit,
+    onPickPrivateKey: () -> Unit,
+    onImport: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Key, null) },
+        title = { Text(stringResource(R.string.settings_security_import_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = stringResource(R.string.settings_security_import_keys_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = publicKeyText,
+                    onValueChange = onPublicKeyTextChange,
+                    label = { Text(stringResource(R.string.settings_security_import_public_key)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 4,
+                    maxLines = 8,
+                    enabled = !importing
+                )
+                OutlinedButton(
+                    onClick = onPickPublicKey,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !importing
+                ) {
+                    Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.settings_security_import_pick_public_key))
+                }
+                OutlinedTextField(
+                    value = privateKeyText,
+                    onValueChange = onPrivateKeyTextChange,
+                    label = { Text(stringResource(R.string.settings_security_import_private_key)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 4,
+                    maxLines = 8,
+                    enabled = !importing
+                )
+                OutlinedButton(
+                    onClick = onPickPrivateKey,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !importing
+                ) {
+                    Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.settings_security_import_pick_private_key))
+                }
+                error?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onImport,
+                enabled = !importing && publicKeyText.isNotBlank() && privateKeyText.isNotBlank()
+            ) {
+                if (importing) {
+                    LoadingIndicator(Modifier.size(18.dp))
+                } else {
+                    Text(stringResource(R.string.settings_import))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !importing) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+private suspend fun readTextFromUri(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        input.bufferedReader(Charsets.UTF_8).readText()
+    } ?: error(context.getString(R.string.settings_security_import_read_failed))
 }
 
 @Composable
@@ -2197,6 +2522,7 @@ private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> 
         subtitle = when (title) {
             stringResource(R.string.settings_account) -> stringResource(R.string.settings_group_account_desc)
             stringResource(R.string.settings_build) -> stringResource(R.string.settings_group_build_desc)
+            stringResource(R.string.settings_security) -> stringResource(R.string.settings_group_security_desc)
             stringResource(R.string.settings_app_update) -> stringResource(R.string.settings_group_app_update_desc)
             stringResource(R.string.settings_notification) -> stringResource(R.string.settings_group_notification_desc)
             stringResource(R.string.settings_navigation) -> stringResource(R.string.settings_group_navigation_desc)
@@ -2221,6 +2547,7 @@ private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> 
         icon = when (title) {
             stringResource(R.string.settings_account) -> Icons.Default.AccountCircle
             stringResource(R.string.settings_build) -> Icons.Default.Build
+            stringResource(R.string.settings_security) -> Icons.Default.VerifiedUser
             stringResource(R.string.settings_app_update) -> Icons.Default.Download
             stringResource(R.string.settings_notification) -> Icons.Default.Notifications
             stringResource(R.string.settings_navigation) -> Icons.Default.ArrowBack

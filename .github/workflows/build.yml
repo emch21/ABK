@@ -2864,37 +2864,38 @@ jobs:
         if: inputs.use_rekernel
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
-          set -e
+          set -euo pipefail
           echo "Integrating Re-Kernel..."
           TMP_REKERNEL=/tmp/rekernel
           rm -rf "$TMP_REKERNEL"
           git clone --depth 1 https://github.com/Sakion-Team/Re-Kernel.git "$TMP_REKERNEL"
 
-          # 准备驱动源码
+          REKERNEL_SRC="$TMP_REKERNEL/LKM-Source"
+          if [ ! -d "$REKERNEL_SRC" ]; then
+            echo "::error::Re-Kernel upstream 缺少 LKM-Source 目录"
+            exit 1
+          fi
+
+          test -f "$REKERNEL_SRC/Makefile"
+          test -f "$REKERNEL_SRC/Kconfig"
+          test -f "$REKERNEL_SRC/rekernel_main.c"
+          test -f "$REKERNEL_SRC/rekernel.h"
+
+          # 准备驱动源码（上游已改为多文件结构）
+          rm -rf common/drivers/rekernel
           mkdir -p common/drivers/rekernel
-          cp "$TMP_REKERNEL/LKM-Source/rekernel.c" common/drivers/rekernel/
-          cp "$TMP_REKERNEL/LKM-Source/rekernel.h" common/drivers/rekernel/
+          cp "$REKERNEL_SRC"/*.c common/drivers/rekernel/
+          cp "$REKERNEL_SRC"/*.h common/drivers/rekernel/
+          cp "$REKERNEL_SRC/Makefile" common/drivers/rekernel/
+          cp "$REKERNEL_SRC/Kconfig" common/drivers/rekernel/
 
-          # 生成构建配置
-          cat > common/drivers/rekernel/Kconfig << 'EOF'
-          menu "Re:Kernel"
-          config REKERNEL
-              bool "Re:Kernel support (GKI Vendor Hooks)"
-              default y
-              help
-                Enable Re-Kernel support via GKI Vendor Hooks.
+          # 适配上游 LKM Makefile 到 in-tree 构建
+          sed -i 's/^obj-m[[:space:]]*:=/obj-$(CONFIG_REKERNEL) +=/' common/drivers/rekernel/Makefile
 
-          config REKERNEL_NETWORK
-              bool "Re:Kernel NetReceive unfreeze support"
-              depends on REKERNEL
-              default n
-          endmenu
-          EOF
-
-          cat > common/drivers/rekernel/Makefile << 'EOF'
-          obj-$(CONFIG_REKERNEL) += rekernel.o
-          ccflags-$(CONFIG_REKERNEL_NETWORK) += -DNETWORK_FILTER
-          EOF
+          # 适配上游 Kconfig 到 ABK 当前的 in-tree 默认启用方式
+          sed -i '/depends on MODULES/d' common/drivers/rekernel/Kconfig
+          sed -i '0,/bool "Re:Kernel module"/s//bool "Re:Kernel support (GKI Vendor Hooks)"/' common/drivers/rekernel/Kconfig
+          sed -i '0,/default n/s//\tdefault y/' common/drivers/rekernel/Kconfig
 
           # 挂载到驱动树
           if ! grep -qF 'source "drivers/rekernel/Kconfig"' common/drivers/Kconfig; then
@@ -2904,17 +2905,12 @@ jobs:
             echo 'obj-$(CONFIG_REKERNEL) += rekernel/' >> common/drivers/Makefile
           fi
 
-          # 启用内核版本宏
-          REKERNEL_H="common/drivers/rekernel/rekernel.h"
-          VERSION_MACRO="KERNEL_$(echo "${{ inputs.kernel_version }}" | tr '.' '_')"
-          if grep -q "^// #define ${VERSION_MACRO}$" "$REKERNEL_H"; then
-            sed -i "s|^// #define ${VERSION_MACRO}$|#define ${VERSION_MACRO}|" "$REKERNEL_H"
-          fi
-
           # 修正头文件包含路径（适配 in-tree 编译）
-          sed -i 's|#include <../android/binder_internal.h>|#include "../../drivers/android/binder_internal.h"|g' common/drivers/rekernel/rekernel.c
-          # 补齐 binder_internal 依赖（避免 5.10 下 DEFINE_SHOW_ATTRIBUTE 报错）
-          grep -qF '#include <linux/seq_file.h>' common/drivers/rekernel/rekernel.c || sed -i '/#include <trace\/hooks\/signal.h>/a #include <linux/seq_file.h>' common/drivers/rekernel/rekernel.c
+          if [ -f common/drivers/rekernel/rekernel_binder.c ]; then
+            sed -i 's|#include <../android/binder_internal.h>|#include "../../drivers/android/binder_internal.h"|g' common/drivers/rekernel/rekernel_binder.c
+            grep -qF '#include <linux/seq_file.h>' common/drivers/rekernel/rekernel_binder.c || \
+              sed -i '/#include <trace\/hooks\/binder.h>/a #include <linux/seq_file.h>' common/drivers/rekernel/rekernel_binder.c
+          fi
 
           # 配置 defconfig（幂等）
           grep -q '^CONFIG_REKERNEL=y$' "$DEFCONFIG" || echo "CONFIG_REKERNEL=y" >> "$DEFCONFIG"
