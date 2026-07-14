@@ -750,6 +750,8 @@ data class RootGrantApp(
     val profileLoaded: Boolean = false
 )
 
+const val ROOT_PROFILE_FLAG_NO_NEW_PRIVS: Long = 1L
+
 data class RootGrantProfile(
     val name: String = "",
     val currentUid: Int = 0,
@@ -762,6 +764,7 @@ data class RootGrantProfile(
     val capabilities: List<Int> = emptyList(),
     val context: String = "u:r:ksu:s0",
     val namespace: Int = 0,
+    val flags: Long = ROOT_PROFILE_FLAG_NO_NEW_PRIVS,
     val nonRootUseDefault: Boolean = true,
     val umountModules: Boolean = true,
     val rules: String = ""
