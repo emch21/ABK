@@ -13,6 +13,7 @@ import com.abk.kernel.data.model.normalizeAppUpdateStability
 import com.abk.kernel.utils.DownloadDirectoryUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
@@ -53,6 +54,8 @@ class PreferencesRepository(private val context: Context) {
         val KEY_CUSTOM_BACKGROUND_URI = stringPreferencesKey("custom_background_uri")
         val KEY_BACKGROUND_IMAGE_ENABLED = booleanPreferencesKey("background_image_enabled")
         val KEY_UI_SURFACE_ALPHA = floatPreferencesKey("ui_surface_alpha")
+        val KEY_BLUR_ENABLED = booleanPreferencesKey("blur_enabled")
+        val KEY_BLUR_BACKGROUND_EXP_ENABLED = booleanPreferencesKey("blur_background_exp_enabled")
         val KEY_BUILD_CONFIG = stringPreferencesKey("build_config_json")
         val KEY_BUILD_PLANS = stringPreferencesKey("build_plans_json")
         val KEY_BUILD_QUEUE = stringPreferencesKey("build_queue_json")
@@ -65,6 +68,8 @@ class PreferencesRepository(private val context: Context) {
         val KEY_PENDING_AUTO_DOWNLOAD_RUN_ID = longPreferencesKey("pending_auto_download_run_id")
         val KEY_DOWNLOAD_MIRROR_BASE_URL = stringPreferencesKey("download_mirror_base_url")
         val KEY_DOWNLOAD_DIRECTORY = stringPreferencesKey("download_directory")
+        val KEY_DOWNLOAD_THREAD_COUNT = intPreferencesKey("download_thread_count")
+        const val DEFAULT_DOWNLOAD_THREAD_COUNT = 8
         val KEY_PREBUILT_GKI_ENABLED = booleanPreferencesKey("prebuilt_gki_enabled")
         val KEY_ARTIFACT_SIGNING_VERIFICATION_ENABLED = booleanPreferencesKey("artifact_signing_verification_enabled")
         val KEY_FORK_ARTIFACT_SIGNING_PUBLIC_KEY = stringPreferencesKey("fork_artifact_signing_public_key")
@@ -105,9 +110,16 @@ class PreferencesRepository(private val context: Context) {
     val dynamicColorEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_DYNAMIC_COLOR_ENABLED] ?: true }
     val customThemeColorArgb: Flow<Int?> = context.dataStore.data.map { it[KEY_CUSTOM_THEME_COLOR] }
     val customAccentColorArgb: Flow<Int?> = context.dataStore.data.map { it[KEY_CUSTOM_ACCENT_COLOR] }
-    val customBackgroundUri: Flow<String?> = context.dataStore.data.map { it[KEY_CUSTOM_BACKGROUND_URI] }
-    val backgroundImageEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_BACKGROUND_IMAGE_ENABLED] ?: false }
-    val uiSurfaceAlpha: Flow<Float> = context.dataStore.data.map { it[KEY_UI_SURFACE_ALPHA] ?: 1f }
+    val customBackgroundUri: Flow<String?> =
+        context.dataStore.data.map { it[KEY_CUSTOM_BACKGROUND_URI] }.distinctUntilChanged()
+    val backgroundImageEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[KEY_BACKGROUND_IMAGE_ENABLED] ?: false }.distinctUntilChanged()
+    val uiSurfaceAlpha: Flow<Float> =
+        context.dataStore.data.map { it[KEY_UI_SURFACE_ALPHA] ?: 1f }.distinctUntilChanged()
+    val blurEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[KEY_BLUR_ENABLED] ?: true }.distinctUntilChanged()
+    val blurBackgroundExpEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[KEY_BLUR_BACKGROUND_EXP_ENABLED] ?: false }.distinctUntilChanged()
     val buildConfigJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_CONFIG] }
     val buildPlansJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_PLANS] }
     val buildQueueJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_QUEUE] }
@@ -124,6 +136,9 @@ class PreferencesRepository(private val context: Context) {
     val downloadMirrorBaseUrl: Flow<String> = context.dataStore.data.map { it[KEY_DOWNLOAD_MIRROR_BASE_URL] ?: "" }
     val downloadDirectory: Flow<String> = context.dataStore.data.map {
         DownloadDirectoryUtils.normalizeDirectoryPath(it[KEY_DOWNLOAD_DIRECTORY])
+    }
+    val downloadThreadCount: Flow<Int> = context.dataStore.data.map {
+        (it[KEY_DOWNLOAD_THREAD_COUNT] ?: DEFAULT_DOWNLOAD_THREAD_COUNT).coerceIn(1, 64)
     }
     val prebuiltGkiEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_PREBUILT_GKI_ENABLED] ?: true }
     val artifactSigningVerificationEnabled: Flow<Boolean> = context.dataStore.data.map {
@@ -247,6 +262,12 @@ class PreferencesRepository(private val context: Context) {
     suspend fun setUiSurfaceAlpha(alpha: Float) = context.dataStore.edit {
         it[KEY_UI_SURFACE_ALPHA] = alpha.coerceIn(0f, 1f)
     }
+    suspend fun setBlurEnabled(v: Boolean) = context.dataStore.edit {
+        it[KEY_BLUR_ENABLED] = v
+    }
+    suspend fun setBlurBackgroundExpEnabled(v: Boolean) = context.dataStore.edit {
+        it[KEY_BLUR_BACKGROUND_EXP_ENABLED] = v
+    }
     suspend fun saveBuildConfigJson(json: String) = context.dataStore.edit { it[KEY_BUILD_CONFIG] = json }
     suspend fun saveBuildPlansJson(json: String) = context.dataStore.edit { it[KEY_BUILD_PLANS] = json }
     suspend fun saveBuildQueueJson(json: String) = context.dataStore.edit { it[KEY_BUILD_QUEUE] = json }
@@ -270,6 +291,9 @@ class PreferencesRepository(private val context: Context) {
         } else {
             preferences[KEY_DOWNLOAD_DIRECTORY] = normalized
         }
+    }
+    suspend fun setDownloadThreadCount(value: Int) = context.dataStore.edit {
+        it[KEY_DOWNLOAD_THREAD_COUNT] = value.coerceIn(1, 64)
     }
     suspend fun setPrebuiltGkiEnabled(v: Boolean) = context.dataStore.edit { it[KEY_PREBUILT_GKI_ENABLED] = v }
     suspend fun setArtifactSigningVerificationEnabled(v: Boolean) = context.dataStore.edit {
